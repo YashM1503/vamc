@@ -12,9 +12,9 @@ is a separate, later decision.
 - [x] Confirm the README, license, citation, security policy, and support scope.
 - [x] Enable the dependency graph, Dependabot alerts/security updates, secret
   scanning, push protection, and private vulnerability reporting.
-- [ ] Create the `main` ruleset: require CI and
+- [x] Create the `main` ruleset: require CI and
   Security checks, resolved conversations, and block force-pushes and deletion.
-- [ ] Run CodeQL manually with `CODEQL_ENABLED=true` and
+- [x] Run CodeQL manually with `CODEQL_ENABLED=true` and
   confirm a successful result.
 - [ ] Verify the private vulnerability reporting link from a non-owner account.
 
