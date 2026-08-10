@@ -1,34 +1,60 @@
 # Security model
 
-VAMC treats original source, generated code, compiler output, reports, and
-benchmark results as untrusted.
+VAMC treats original source, generated code, compiler output, case files,
+reports, and benchmark results as untrusted.
 
-## Implemented in the Understand milestone
+## Analysis and migration
 
 - Analysis never compiles, imports, or executes Fortran.
-- Directory traversal does not follow symbolic links.
-- Explicit symbolic-link input roots are rejected.
-- Root-anchored descriptor reads reject symlinks and non-regular files.
-- Per-file, total-byte, file-count, line, statement, and nesting limits bound
-  common resource attacks.
-- Hidden, VCS, dependency, build, and cache directories are excluded by default.
-- Invalid UTF-8 and unsupported input types fail explicitly.
-- Reports are created mode `0600` and do not overwrite an existing path unless
-  `--force` is explicit. Reports may contain proprietary paths, hashes, symbols,
-  and call names and must be handled as sensitive data.
+- Symbolic-link input roots and discovered symlink files are rejected.
+- Root-anchored descriptor reads reject path traversal, symlinks, device files,
+  FIFOs, and source replacement during open.
+- File count, per-file and aggregate bytes, lines, line length, normalized
+  statements, loop nesting, and PSyIR node counts are bounded.
+- Hidden, VCS, dependency, cache, build, and generated directories are excluded
+  by default.
+- Invalid UTF-8, unsupported input types, parser failure, partial PSyIR, unknown
+  calls, and unsupported lowering all fail closed.
+- Migration output is assembled in a private temporary directory and renamed
+  atomically. Existing destinations and symlinks are never overwritten.
+- Artifact paths are normalized and the manifest records SHA-256 and byte size.
 
-## Required before source execution
+## Static verification
 
-Compilation and execution will default to a rootless Docker/Podman sandbox with
-no network, no host credentials, a read-only base filesystem, a private scratch
-directory, a non-root user, dropped capabilities, no-new-privileges, and CPU,
-memory, PID, file-size, disk, and time limits. Host execution will require an
-explicit noisy opt-in.
+`vamc verify modern/` uses root-anchored reads, enforces artifact and aggregate
+size limits, checks every declared digest, and parses generated Python with
+`ast`. It does not import or execute generated modules.
 
-Generated HTML will be static, escaped, and free of remote resources and
-third-party scripts.
+## Native execution boundary
 
-The CodeQL workflow is present but gated by a repository variable named
-`CODEQL_ENABLED`. Set it to `true` after GitHub code scanning is enabled for the
-private repository; this avoids a permanently failing workflow on plans without
-GitHub Advanced Security.
+There is no automatic host-execution fallback. Native differential verification
+requires a digest-pinned Docker image and applies:
+
+- `--network=none`;
+- a read-only root filesystem;
+- all Linux capabilities dropped;
+- `no-new-privileges`;
+- the caller's non-root UID/GID;
+- bounded CPU, memory, PIDs, open files, output, file size, and wall time;
+- `noexec`, `nosuid`, and `nodev` temporary storage;
+- sanitized environment variables;
+- read-only source, runner, oracle, and generated-package mounts;
+- a dedicated writable result directory.
+
+The Docker daemon itself is a privileged boundary and must be operated according
+to local security policy. The sandbox image must contain Python, NumPy, Meson,
+Ninja, and a Fortran compiler. See [`sandbox/README.md`](../sandbox/README.md).
+
+## Reports and sensitive data
+
+Reports can contain proprietary paths, hashes, routine names, call names, and
+numerical results. JSON outputs are created atomically and default to mode
+`0600`. Future HTML reports must escape all source-controlled text, use no
+remote resources or third-party scripts, and ship a restrictive CSP.
+
+## Repository controls
+
+The public GitHub repository uses protected main-branch rules, pull-request
+checks, dependency review, CodeQL, secret scanning, Dependabot, and release
+artifact validation. CI analysis and tests do not execute contributor-supplied
+Fortran or generated code outside the explicit sandbox workflow.
