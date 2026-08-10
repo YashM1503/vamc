@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security report
+    url: https://github.com/YashM1503/vamc/security/advisories/new
+    about: Report vulnerabilities privately.
