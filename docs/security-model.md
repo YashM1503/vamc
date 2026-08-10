@@ -8,9 +8,14 @@ benchmark results as untrusted.
 - Analysis never compiles, imports, or executes Fortran.
 - Directory traversal does not follow symbolic links.
 - Explicit symbolic-link input roots are rejected.
-- Per-file and per-project file-count limits bound common resource attacks.
+- Root-anchored descriptor reads reject symlinks and non-regular files.
+- Per-file, total-byte, file-count, line, statement, and nesting limits bound
+  common resource attacks.
 - Hidden, VCS, dependency, build, and cache directories are excluded by default.
 - Invalid UTF-8 and unsupported input types fail explicitly.
+- Reports are created mode `0600` and do not overwrite an existing path unless
+  `--force` is explicit. Reports may contain proprietary paths, hashes, symbols,
+  and call names and must be handled as sensitive data.
 
 ## Required before source execution
 

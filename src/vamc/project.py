@@ -1,7 +1,6 @@
 """Public project API."""
 
 from pathlib import Path
-from typing import Optional, Union
 
 from vamc.analysis.inventory import analyze_project
 from vamc.config import AnalysisConfig
@@ -16,12 +15,10 @@ class Project:
         self.config = config
 
     @classmethod
-    def from_path(
-        cls, path: Union[str, Path], config: Optional[AnalysisConfig] = None
-    ) -> "Project":
+    def from_path(cls, path: str | Path, config: AnalysisConfig | None = None) -> "Project":
         return cls(Path(path), config or AnalysisConfig())
 
     def analyze(self) -> AnalysisResult:
-        """Create a semantic inventory without executing source code."""
+        """Create a bounded lexical inventory without executing source code."""
 
         return analyze_project(self.path, self.config)

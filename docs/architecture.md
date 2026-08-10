@@ -6,7 +6,7 @@ VAMC follows a staged, evidence-carrying pipeline:
 Fortran source
   -> discovery and normalization
   -> PSyclone / PSyIR frontend (next milestone)
-  -> semantic digest and program analysis
+  -> bounded lexical digest (current bootstrap)
   -> serial Python, NumPy, and Numba candidates
   -> isolated native oracle and candidate runtime
   -> differential and property verification

@@ -1,27 +1,32 @@
 """Stable, serializable analysis models."""
 
 from dataclasses import asdict, dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any, cast
 
 
-class SourceForm(str, Enum):
+class SourceForm(StrEnum):
     FIXED = "fixed"
     FREE = "free"
 
 
-class RoutineKind(str, Enum):
+class RoutineKind(StrEnum):
     PROGRAM = "program"
     SUBROUTINE = "subroutine"
     FUNCTION = "function"
 
 
-class SupportStatus(str, Enum):
-    ANALYZED = "ANALYZED"
+class SupportStatus(StrEnum):
+    LEXICALLY_SCANNED = "LEXICALLY_SCANNED"
     REQUIRES_FALLBACK = "REQUIRES_FALLBACK"
 
 
-class LoopPattern(str, Enum):
+class EvidenceStatus(StrEnum):
+    OBSERVED = "OBSERVED"
+    UNKNOWN = "UNKNOWN"
+
+
+class LoopPattern(StrEnum):
     MAP = "MAP"
     REDUCTION = "REDUCTION"
     STENCIL = "STENCIL"
@@ -30,7 +35,7 @@ class LoopPattern(str, Enum):
     UNKNOWN = "UNKNOWN"
 
 
-class ParallelStatus(str, Enum):
+class ParallelStatus(StrEnum):
     UNRESOLVED = "UNRESOLVED"
     CONDITIONALLY_SAFE = "CONDITIONALLY_SAFE"
     SERIAL = "SERIAL"
@@ -38,11 +43,20 @@ class ParallelStatus(str, Enum):
 
 @dataclass(frozen=True)
 class SideEffects:
-    filesystem: bool = False
-    network: bool = False
-    global_state: bool = False
-    stdout: bool = False
-    process: bool = False
+    """Lexical evidence, never proof that an effect is absent."""
+
+    filesystem: EvidenceStatus = EvidenceStatus.UNKNOWN
+    network: EvidenceStatus = EvidenceStatus.UNKNOWN
+    global_state: EvidenceStatus = EvidenceStatus.UNKNOWN
+    stdout: EvidenceStatus = EvidenceStatus.UNKNOWN
+    process: EvidenceStatus = EvidenceStatus.UNKNOWN
+
+
+@dataclass(frozen=True)
+class Diagnostic:
+    code: str
+    message: str
+    line: int
 
 
 @dataclass(frozen=True)
@@ -70,6 +84,7 @@ class RoutineDigest:
     loops: tuple[LoopDigest, ...]
     support_status: SupportStatus
     unsupported_constructs: tuple[str, ...]
+    diagnostics: tuple[Diagnostic, ...]
 
 
 @dataclass(frozen=True)
@@ -80,6 +95,8 @@ class SourceFileDigest:
     line_count: int
     source_form: SourceForm
     routines: tuple[RoutineDigest, ...]
+    support_status: SupportStatus
+    diagnostics: tuple[Diagnostic, ...]
 
 
 @dataclass(frozen=True)
@@ -89,6 +106,27 @@ class AnalysisSummary:
     loops: int
     calls: int
     fallback_routines: int
+    fallback_files: int
+    diagnostics: int
+
+
+@dataclass(frozen=True)
+class AnalysisLimits:
+    max_file_bytes: int
+    max_total_bytes: int
+    max_files: int
+    max_lines_per_file: int
+    max_line_bytes: int
+    max_statements_per_file: int
+    max_loop_nesting: int
+    include_hidden: bool
+
+
+@dataclass(frozen=True)
+class AnalysisProvenance:
+    tool_version: str
+    frontend: str
+    limits: AnalysisLimits
 
 
 def _jsonable(value: Any) -> Any:
@@ -105,6 +143,7 @@ def _jsonable(value: Any) -> Any:
 class AnalysisResult:
     schema_version: str
     source_root: str
+    provenance: AnalysisProvenance
     files: tuple[SourceFileDigest, ...]
     summary: AnalysisSummary
 

@@ -2,7 +2,8 @@ cff-version: 1.2.0
 title: Verified Adaptive Modernization Compiler
 message: If you use VAMC in research, please cite the software release.
 type: software
-version: 0.1.0-alpha.1
-date-released: 2026-08-09
+authors:
+  - family-names: Misra
+    given-names: Yash
 license: Apache-2.0
 repository-code: https://github.com/YashM1503/vamc
