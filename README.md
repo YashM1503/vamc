@@ -78,7 +78,8 @@ migration.write("modern")
 
 See [the security model](https://github.com/YashM1503/vamc/blob/main/docs/security-model.md),
 [verification semantics](https://github.com/YashM1503/vamc/blob/main/docs/verification-semantics.md),
-and [architecture](https://github.com/YashM1503/vamc/blob/main/docs/architecture.md).
+[architecture](https://github.com/YashM1503/vamc/blob/main/docs/architecture.md), and the
+[CLI reference](https://github.com/YashM1503/vamc/blob/main/docs/cli.md).
 
 ## Roadmap
 
