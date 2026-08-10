@@ -13,6 +13,7 @@ from vamc.config import AnalysisConfig
         "max_line_bytes",
         "max_statements_per_file",
         "max_loop_nesting",
+        "max_ir_nodes_per_file",
     ],
 )
 def test_analysis_limits_must_be_positive(field: str) -> None:

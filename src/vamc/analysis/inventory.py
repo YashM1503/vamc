@@ -3,16 +3,23 @@
 import os
 import stat
 from collections.abc import Iterable
+from dataclasses import dataclass, replace
+from importlib.metadata import version
 from pathlib import Path
 
 from vamc._version import __version__
 from vamc.config import AnalysisConfig
 from vamc.frontends.fortran import FORTRAN_SUFFIXES, analyze_fortran_source
+from vamc.frontends.psyir import enrich_with_psyir
 from vamc.models import (
     AnalysisLimits,
     AnalysisProvenance,
     AnalysisResult,
     AnalysisSummary,
+    CallGraphEdge,
+    CallResolution,
+    ParserStatus,
+    RoutineDigest,
     SourceFileDigest,
     SupportStatus,
 )
@@ -34,6 +41,14 @@ _IGNORED_DIRECTORIES = {
 
 class AnalysisError(RuntimeError):
     """Raised when safe, bounded analysis cannot proceed."""
+
+
+@dataclass(frozen=True)
+class LoadedSource:
+    """A source file captured through the bounded, root-anchored reader."""
+
+    relative_path: str
+    text: str
 
 
 def _inside(candidate: Path, root: Path) -> bool:
@@ -162,7 +177,101 @@ def _validate_text_bounds(data: bytes, path: Path, config: AnalysisConfig) -> No
         raise AnalysisError(f"source file contains an overlong line: {path.name}")
 
 
-def analyze_project(input_path: Path, config: AnalysisConfig) -> AnalysisResult:
+def _call_graph(files: tuple[SourceFileDigest, ...]) -> tuple[CallGraphEdge, ...]:
+    definitions: dict[str, list[tuple[str, str]]] = {}
+    for file_digest in files:
+        for routine in file_digest.routines:
+            definitions.setdefault(routine.name, []).append((file_digest.path, routine.name))
+
+    edges: list[CallGraphEdge] = []
+    for file_digest in files:
+        for routine in file_digest.routines:
+            for callee in routine.calls:
+                targets = definitions.get(callee, [])
+                if len(targets) == 1:
+                    resolution = CallResolution.RESOLVED
+                    target_file, target_routine = targets[0]
+                elif len(targets) > 1:
+                    resolution = CallResolution.AMBIGUOUS
+                    target_file = None
+                    target_routine = None
+                else:
+                    resolution = CallResolution.UNRESOLVED
+                    target_file = None
+                    target_routine = None
+                edges.append(
+                    CallGraphEdge(
+                        caller_file=file_digest.path,
+                        caller_routine=routine.name,
+                        callee=callee,
+                        resolution=resolution,
+                        target_file=target_file,
+                        target_routine=target_routine,
+                    )
+                )
+    return tuple(
+        sorted(
+            edges,
+            key=lambda item: (item.caller_file, item.caller_routine, item.callee),
+        )
+    )
+
+
+def _resolved_support(
+    files: tuple[SourceFileDigest, ...], edges: tuple[CallGraphEdge, ...]
+) -> tuple[SourceFileDigest, ...]:
+    by_caller: dict[tuple[str, str], list[CallGraphEdge]] = {}
+    for edge in edges:
+        by_caller.setdefault((edge.caller_file, edge.caller_routine), []).append(edge)
+
+    resolved_files: list[SourceFileDigest] = []
+    for file_digest in files:
+        routines: list[RoutineDigest] = []
+        for routine in file_digest.routines:
+            unsupported = set(routine.unsupported_constructs)
+            call_edges = by_caller.get((file_digest.path, routine.name), [])
+            if call_edges and all(
+                edge.resolution is CallResolution.RESOLVED for edge in call_edges
+            ):
+                unsupported.discard("unresolved_external_call")
+            support = routine.support_status
+            if routine.parser_status is ParserStatus.AUTHORITATIVE and not unsupported:
+                support = SupportStatus.AUTHORITATIVELY_PARSED
+            elif unsupported:
+                support = SupportStatus.REQUIRES_FALLBACK
+            routines.append(
+                replace(
+                    routine,
+                    support_status=support,
+                    unsupported_constructs=tuple(sorted(unsupported)),
+                )
+            )
+        file_fallback = (
+            file_digest.parser_status in {ParserStatus.FAILED, ParserStatus.PARTIAL}
+            or not routines
+            or any(
+                routine.support_status is SupportStatus.REQUIRES_FALLBACK for routine in routines
+            )
+        )
+        resolved_files.append(
+            replace(
+                file_digest,
+                routines=tuple(routines),
+                support_status=(
+                    SupportStatus.REQUIRES_FALLBACK
+                    if file_fallback
+                    else SupportStatus.AUTHORITATIVELY_PARSED
+                ),
+            )
+        )
+    return tuple(resolved_files)
+
+
+def analyze_project_with_sources(
+    input_path: Path, config: AnalysisConfig
+) -> tuple[AnalysisResult, tuple[LoadedSource, ...]]:
+    """Analyze a project and retain the exact bounded source snapshot in memory."""
+
     requested = input_path.expanduser()
     if requested.is_symlink():
         raise AnalysisError("symbolic-link input roots are not accepted")
@@ -174,6 +283,7 @@ def analyze_project(input_path: Path, config: AnalysisConfig) -> AnalysisResult:
 
     source_root = root.parent if root.is_file() else root
     digests: list[SourceFileDigest] = []
+    loaded_sources: list[LoadedSource] = []
     total_bytes = 0
     root_descriptor = _open_root_directory(source_root)
     try:
@@ -184,7 +294,7 @@ def analyze_project(input_path: Path, config: AnalysisConfig) -> AnalysisResult:
                 raise AnalysisError("source path escapes the requested root")
             try:
                 data = _read_regular_file(root_descriptor, relative_path, path, config)
-                data.decode("utf-8-sig")
+                source = data.decode("utf-8-sig")
             except UnicodeDecodeError as error:
                 raise AnalysisError(f"source file is not valid UTF-8: {path.name}") from error
             _validate_text_bounds(data, resolved, config)
@@ -192,14 +302,20 @@ def analyze_project(input_path: Path, config: AnalysisConfig) -> AnalysisResult:
             if total_bytes > config.max_total_bytes:
                 raise AnalysisError("source tree exceeds total byte limit")
             relative = relative_path.as_posix()
+            loaded_sources.append(LoadedSource(relative_path=relative, text=source))
             try:
+                lexical = analyze_fortran_source(
+                    resolved,
+                    relative,
+                    data,
+                    max_statements=config.max_statements_per_file,
+                    max_loop_nesting=config.max_loop_nesting,
+                )
                 digests.append(
-                    analyze_fortran_source(
-                        resolved,
-                        relative,
-                        data,
-                        max_statements=config.max_statements_per_file,
-                        max_loop_nesting=config.max_loop_nesting,
+                    enrich_with_psyir(
+                        source,
+                        lexical,
+                        max_ir_nodes=config.max_ir_nodes_per_file,
                     )
                 )
             except ValueError as error:
@@ -207,14 +323,17 @@ def analyze_project(input_path: Path, config: AnalysisConfig) -> AnalysisResult:
     finally:
         os.close(root_descriptor)
 
-    ordered: tuple[SourceFileDigest, ...] = tuple(sorted(digests, key=lambda item: item.path))
+    ordered = tuple(sorted(digests, key=lambda item: item.path))
+    graph = _call_graph(ordered)
+    ordered = _resolved_support(ordered, graph)
     routines = [routine for file_digest in ordered for routine in file_digest.routines]
-    return AnalysisResult(
-        schema_version="0.2.0",
+    resolutions = [edge.resolution for edge in graph]
+    result = AnalysisResult(
+        schema_version="0.3.0",
         source_root=source_root.name,
         provenance=AnalysisProvenance(
             tool_version=__version__,
-            frontend="vamc.lexical-fortran.v1",
+            frontend="vamc.psyir-fortran.v1",
             limits=AnalysisLimits(
                 max_file_bytes=config.max_file_bytes,
                 max_total_bytes=config.max_total_bytes,
@@ -224,7 +343,9 @@ def analyze_project(input_path: Path, config: AnalysisConfig) -> AnalysisResult:
                 max_statements_per_file=config.max_statements_per_file,
                 max_loop_nesting=config.max_loop_nesting,
                 include_hidden=config.include_hidden,
+                max_ir_nodes_per_file=config.max_ir_nodes_per_file,
             ),
+            authoritative_frontend=f"PSyclone {version('psyclone')} / fparser2",
         ),
         files=ordered,
         summary=AnalysisSummary(
@@ -242,5 +363,21 @@ def analyze_project(input_path: Path, config: AnalysisConfig) -> AnalysisResult:
                 len(item.diagnostics) + sum(len(routine.diagnostics) for routine in item.routines)
                 for item in ordered
             ),
+            authoritative_files=sum(
+                item.parser_status is ParserStatus.AUTHORITATIVE for item in ordered
+            ),
+            partial_files=sum(item.parser_status is ParserStatus.PARTIAL for item in ordered),
+            resolved_calls=resolutions.count(CallResolution.RESOLVED),
+            unresolved_calls=resolutions.count(CallResolution.UNRESOLVED),
+            ambiguous_calls=resolutions.count(CallResolution.AMBIGUOUS),
         ),
+        call_graph=graph,
     )
+    return result, tuple(sorted(loaded_sources, key=lambda item: item.relative_path))
+
+
+def analyze_project(input_path: Path, config: AnalysisConfig) -> AnalysisResult:
+    """Analyze a project without executing, importing, or compiling source code."""
+
+    result, _ = analyze_project_with_sources(input_path, config)
+    return result

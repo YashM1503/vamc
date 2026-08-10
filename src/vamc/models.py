@@ -18,7 +18,39 @@ class RoutineKind(StrEnum):
 
 class SupportStatus(StrEnum):
     LEXICALLY_SCANNED = "LEXICALLY_SCANNED"
+    AUTHORITATIVELY_PARSED = "AUTHORITATIVELY_PARSED"
     REQUIRES_FALLBACK = "REQUIRES_FALLBACK"
+
+
+class ParserStatus(StrEnum):
+    LEXICAL_ONLY = "LEXICAL_ONLY"
+    AUTHORITATIVE = "AUTHORITATIVE"
+    PARTIAL = "PARTIAL"
+    FAILED = "FAILED"
+
+
+class DataType(StrEnum):
+    INTEGER = "INTEGER"
+    REAL = "REAL"
+    LOGICAL = "LOGICAL"
+    CHARACTER = "CHARACTER"
+    COMPLEX = "COMPLEX"
+    DERIVED = "DERIVED"
+    UNKNOWN = "UNKNOWN"
+
+
+class ArgumentAccess(StrEnum):
+    NOT_ARGUMENT = "NOT_ARGUMENT"
+    READ = "READ"
+    WRITE = "WRITE"
+    READWRITE = "READWRITE"
+    UNKNOWN = "UNKNOWN"
+
+
+class CallResolution(StrEnum):
+    RESOLVED = "RESOLVED"
+    AMBIGUOUS = "AMBIGUOUS"
+    UNRESOLVED = "UNRESOLVED"
 
 
 class EvidenceStatus(StrEnum):
@@ -41,6 +73,31 @@ class ParallelStatus(StrEnum):
     SERIAL = "SERIAL"
 
 
+class TranslationStatus(StrEnum):
+    TRANSLATED = "TRANSLATED"
+    FALLBACK_REQUIRED = "FALLBACK_REQUIRED"
+
+
+class VerificationStatus(StrEnum):
+    UNVERIFIED = "UNVERIFIED"
+    STATICALLY_CHECKED = "STATICALLY_CHECKED"
+    VERIFIED_FOR_TEST_DOMAIN = "VERIFIED_FOR_TEST_DOMAIN"
+    FAILED = "FAILED"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+class CandidateBackend(StrEnum):
+    NUMPY = "NUMPY"
+    NUMBA_SERIAL = "NUMBA_SERIAL"
+    NUMBA_PARALLEL = "NUMBA_PARALLEL"
+
+
+class CandidateStatus(StrEnum):
+    REQUIRES_VERIFICATION = "REQUIRES_VERIFICATION"
+    VERIFIED = "VERIFIED"
+    REJECTED = "REJECTED"
+
+
 @dataclass(frozen=True)
 class SideEffects:
     """Lexical evidence, never proof that an effect is absent."""
@@ -57,6 +114,18 @@ class Diagnostic:
     code: str
     message: str
     line: int
+
+
+@dataclass(frozen=True)
+class SymbolDigest:
+    name: str
+    data_type: DataType
+    precision: str
+    rank: int
+    shape: tuple[str, ...]
+    is_argument: bool
+    argument_access: ArgumentAccess
+    is_constant: bool
 
 
 @dataclass(frozen=True)
@@ -85,6 +154,9 @@ class RoutineDigest:
     support_status: SupportStatus
     unsupported_constructs: tuple[str, ...]
     diagnostics: tuple[Diagnostic, ...]
+    parser_status: ParserStatus = ParserStatus.LEXICAL_ONLY
+    symbol_details: tuple[SymbolDigest, ...] = ()
+    ir_node_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -97,6 +169,18 @@ class SourceFileDigest:
     routines: tuple[RoutineDigest, ...]
     support_status: SupportStatus
     diagnostics: tuple[Diagnostic, ...]
+    parser_status: ParserStatus = ParserStatus.LEXICAL_ONLY
+    ir_node_count: int = 0
+
+
+@dataclass(frozen=True)
+class CallGraphEdge:
+    caller_file: str
+    caller_routine: str
+    callee: str
+    resolution: CallResolution
+    target_file: str | None = None
+    target_routine: str | None = None
 
 
 @dataclass(frozen=True)
@@ -108,6 +192,11 @@ class AnalysisSummary:
     fallback_routines: int
     fallback_files: int
     diagnostics: int
+    authoritative_files: int = 0
+    partial_files: int = 0
+    resolved_calls: int = 0
+    unresolved_calls: int = 0
+    ambiguous_calls: int = 0
 
 
 @dataclass(frozen=True)
@@ -120,6 +209,7 @@ class AnalysisLimits:
     max_statements_per_file: int
     max_loop_nesting: int
     include_hidden: bool
+    max_ir_nodes_per_file: int = 250_000
 
 
 @dataclass(frozen=True)
@@ -127,6 +217,7 @@ class AnalysisProvenance:
     tool_version: str
     frontend: str
     limits: AnalysisLimits
+    authoritative_frontend: str | None = None
 
 
 def _jsonable(value: Any) -> Any:
@@ -146,8 +237,157 @@ class AnalysisResult:
     provenance: AnalysisProvenance
     files: tuple[SourceFileDigest, ...]
     summary: AnalysisSummary
+    call_graph: tuple[CallGraphEdge, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible representation."""
+
+        return cast(dict[str, Any], _jsonable(asdict(self)))
+
+
+@dataclass(frozen=True)
+class SourceMapEntry:
+    source_file: str
+    source_start_line: int
+    source_end_line: int
+    generated_file: str
+    generated_start_line: int
+    generated_end_line: int
+    routine: str
+
+
+@dataclass(frozen=True)
+class RoutineTranslation:
+    source_file: str
+    routine: str
+    status: TranslationStatus
+    generated_file: str | None
+    fallback_reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class GeneratedArtifact:
+    """One deterministic output artifact held in memory until explicitly written."""
+
+    path: str
+    content: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class ArtifactDigest:
+    path: str
+    sha256: str
+    size_bytes: int
+
+
+@dataclass(frozen=True)
+class CandidateRecord:
+    id: str
+    parent: str
+    source_file: str
+    routine: str
+    backend: CandidateBackend
+    generated_file: str
+    transforms: tuple[str, ...]
+    preconditions: tuple[str, ...]
+    status: CandidateStatus
+
+
+@dataclass(frozen=True)
+class MigrationSummary:
+    files: int
+    routines: int
+    translated_routines: int
+    fallback_routines: int
+
+
+@dataclass(frozen=True)
+class MigrationManifest:
+    schema_version: str
+    generator_version: str
+    source_root: str
+    target: str
+    package_name: str
+    analysis_schema_version: str
+    artifacts: tuple[ArtifactDigest, ...]
+    candidates: tuple[CandidateRecord, ...]
+    source_maps: tuple[SourceMapEntry, ...]
+    routines: tuple[RoutineTranslation, ...]
+    summary: MigrationSummary
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-compatible representation without generated source bodies."""
+
+        return cast(dict[str, Any], _jsonable(asdict(self)))
+
+
+@dataclass(frozen=True)
+class NumericalPolicy:
+    name: str
+    relative_tolerance: float
+    absolute_tolerance: float
+    equal_nan: bool = True
+
+
+@dataclass(frozen=True)
+class ComparisonMetrics:
+    equal: bool
+    compared_values: int
+    max_absolute_error: float
+    max_relative_error: float
+    nan_mismatches: int
+    infinity_mismatches: int
+    structural_mismatches: int
+
+
+@dataclass(frozen=True)
+class RoutineVerification:
+    routine: str
+    status: VerificationStatus
+    cases: int
+    policy: NumericalPolicy
+    metrics: ComparisonMetrics
+    diagnostics: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CandidateVerification:
+    candidate_id: str
+    routine: str
+    backend: CandidateBackend
+    status: VerificationStatus
+    cases: int
+    policy: NumericalPolicy
+    metrics: ComparisonMetrics
+    diagnostics: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class VerificationSummary:
+    routines: int
+    statically_checked: int
+    verified_for_test_domain: int
+    failed: int
+    unavailable: int
+    candidates_statically_checked: int = 0
+    candidates_verified: int = 0
+    candidates_rejected: int = 0
+    candidates_unavailable: int = 0
+
+
+@dataclass(frozen=True)
+class VerificationReport:
+    schema_version: str
+    migration_schema_version: str
+    status: VerificationStatus
+    sandbox: str
+    sandbox_image: str | None
+    routines: tuple[RoutineVerification, ...]
+    summary: VerificationSummary
+    candidates: tuple[CandidateVerification, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-compatible verification record."""
 
         return cast(dict[str, Any], _jsonable(asdict(self)))

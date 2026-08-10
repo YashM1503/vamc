@@ -13,17 +13,25 @@ def test_example_analysis_is_deterministic() -> None:
     second = Project.from_path(example).analyze().to_dict()
 
     assert first == second
-    assert first["provenance"]["frontend"] == "vamc.lexical-fortran.v1"
+    assert first["provenance"]["frontend"] == "vamc.psyir-fortran.v1"
+    assert first["provenance"]["authoritative_frontend"].startswith("PSyclone ")
     assert first["summary"] == {
+        "ambiguous_calls": 0,
+        "authoritative_files": 1,
         "calls": 0,
         "diagnostics": 0,
         "fallback_files": 0,
         "fallback_routines": 0,
         "files": 1,
         "loops": 1,
+        "partial_files": 0,
+        "resolved_calls": 0,
         "routines": 1,
+        "unresolved_calls": 0,
     }
     assert first["files"][0]["routines"][0]["symbols"] == ["a", "i", "n", "x", "y"]
+    assert first["files"][0]["parser_status"] == "AUTHORITATIVE"
+    assert first["files"][0]["routines"][0]["support_status"] == "AUTHORITATIVELY_PARSED"
 
 
 def test_cli_writes_machine_readable_report(tmp_path: Path) -> None:
@@ -32,7 +40,7 @@ def test_cli_writes_machine_readable_report(tmp_path: Path) -> None:
 
     assert main(["analyze", str(example), "--output", str(output)]) == 0
     report = json.loads(output.read_text(encoding="utf-8"))
-    assert report["schema_version"] == "0.2.0"
+    assert report["schema_version"] == "0.3.0"
     assert report["files"][0]["routines"][0]["name"] == "daxpy"
 
 
@@ -47,7 +55,7 @@ def test_cli_does_not_clobber_existing_report_without_force(tmp_path: Path) -> N
     assert output.read_text(encoding="utf-8") == "keep"
 
     assert main(["analyze", str(example), "--output", str(output), "--force"]) == 0
-    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == "0.2.0"
+    assert json.loads(output.read_text(encoding="utf-8"))["schema_version"] == "0.3.0"
 
 
 def test_cli_output_does_not_follow_symlink(tmp_path: Path) -> None:
