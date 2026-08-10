@@ -14,6 +14,7 @@ class AnalysisConfig:
     max_line_bytes: int = 64 * 1024
     max_statements_per_file: int = 100_000
     max_loop_nesting: int = 128
+    max_ir_nodes_per_file: int = 250_000
     include_hidden: bool = False
 
     def __post_init__(self) -> None:
@@ -31,3 +32,5 @@ class AnalysisConfig:
             raise ValueError("max_statements_per_file must be positive")
         if self.max_loop_nesting <= 0:
             raise ValueError("max_loop_nesting must be positive")
+        if self.max_ir_nodes_per_file <= 0:
+            raise ValueError("max_ir_nodes_per_file must be positive")

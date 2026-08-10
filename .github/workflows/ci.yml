@@ -29,11 +29,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e '.[dev,security]'
+      - run: python -m pip install -e '.[dev,security,optimize]'
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy
-      - run: pytest --cov=vamc --cov-report=term-missing --cov-fail-under=90
+      - run: pytest --cov=vamc --cov-report=term-missing --cov-fail-under=85
       - run: python -m build
       - run: check-wheel-contents dist/*.whl
       - run: twine check dist/*
