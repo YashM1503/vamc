@@ -1,21 +1,20 @@
-# Public release checklist
+# Release checklist
 
-The repository may be opened as experimental pre-alpha software only after all
-items in the visibility gate are complete. Publishing a package is a separate,
-later decision.
+The repository is public experimental pre-alpha software. Publishing a package
+is a separate, later decision.
 
-## Visibility gate
+## Public repository record (2026-08-10)
 
-- [ ] Decide whether the email address in commit `408b925` may become public;
-  rewrite the commit to a GitHub noreply address first if not.
-- [ ] Review and merge the hardening changes through a passing pull request.
-- [ ] Confirm the README, license, citation, security policy, and support scope.
-- [ ] Change visibility to public.
-- [ ] Recreate the `main` ruleset after the visibility change: require CI and
+- [x] Preserve the original repository and pull-request record in a private
+  archive.
+- [x] Create the public repository from a sanitized, GitHub-noreply-only history.
+- [x] Review and merge the hardening changes through a passing pull request.
+- [x] Confirm the README, license, citation, security policy, and support scope.
+- [x] Enable the dependency graph, Dependabot alerts/security updates, secret
+  scanning, push protection, and private vulnerability reporting.
+- [ ] Create the `main` ruleset: require CI and
   Security checks, resolved conversations, and block force-pushes and deletion.
-- [ ] Enable the dependency graph, Dependabot alerts/security updates, secret
-  scanning, push protection, private vulnerability reporting, and CodeQL.
-- [ ] Set repository variable `CODEQL_ENABLED=true`, run CodeQL manually, and
+- [ ] Run CodeQL manually with `CODEQL_ENABLED=true` and
   confirm a successful result.
 - [ ] Verify the private vulnerability reporting link from a non-owner account.
 

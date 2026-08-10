@@ -26,10 +26,22 @@ The scanner is not a complete Fortran parser. Its `LEXICALLY_SCANNED` status and
 calls, unsupported statements, and malformed scopes require fallback. No code is
 generated, executed, parallelized, or labeled verified.
 
+## Requirements and portability
+
+- Python 3.11 through 3.14;
+- macOS or Linux on any CPU architecture supported by Python;
+- Windows through WSL (native Windows is not currently supported);
+- no runtime Python packages beyond the standard library;
+- no GPU, Fortran compiler, container runtime, database, cloud account, or network
+  connection for the current `analyze` command.
+
+Future translation and verification stages will add optional native Fortran,
+NumPy, Numba, and sandbox dependencies. They are not part of the current release.
+
 ## Quick start
 
 ```bash
-python3.11 -m venv .venv
+python3.13 -m venv .venv
 . .venv/bin/activate
 python -m pip install -e '.[dev]'
 
