@@ -1,7 +1,8 @@
 # VAMC verification sandbox
 
 VAMC never compiles or executes user Fortran or generated Python directly on the
-host. Native differential verification requires Docker and a purpose-built image.
+host. Native differential verification, verified-only benchmarking, and fallback
+compilation require Docker and a purpose-built image.
 
 Build the image from a digest-pinned, platform-appropriate Python base:
 
@@ -19,9 +20,18 @@ push it to a trusted registry or address it by its `sha256:...` image ID.
 
 Every verification container runs with networking disabled, a read-only root
 filesystem, all Linux capabilities dropped, `no-new-privileges`, a non-root UID,
-bounded CPU, memory, PIDs, output, file size, and wall time, plus explicit
+bounded CPU, memory, PIDs, output, per-file size, aggregate writable bytes and
+entries, and wall time, plus explicit
 read-only input mounts and a dedicated result directory. There is no automatic
 host-execution fallback.
+
+Meson must execute compiler sanity products, so compilation uses the bounded,
+aggregate-monitored output mount as `TMPDIR`; the normal `/tmp` remains `noexec`.
+No compiler product is executed on the host.
+
+The supplied Dockerfile pins NumPy and Numba versions compatible with the
+generated package's optimization extra; Meson, Ninja, GCC, and gfortran support
+F2PY compilation. Review and update those pins through normal dependency review.
 
 Case files use schema `0.1.0`:
 
@@ -55,3 +65,24 @@ vamc verify modern/ \
 
 The report uses `VERIFIED_FOR_TEST_DOMAIN`; differential tests are never called
 formal proof.
+
+Use that exact evidence and image for timing:
+
+```bash
+vamc benchmark modern/ --cases cases.json \
+  --verification verification.json \
+  --sandbox-image 'registry.example/vamc-sandbox@sha256:<same-digest>' \
+  --output benchmark.json
+```
+
+For a migration with retained routines, build a separately reviewable native
+bridge with:
+
+```bash
+vamc build-fallback modern/ \
+  --sandbox-image 'registry.example/vamc-sandbox@sha256:<digest>' \
+  --output fallback-build/
+```
+
+The extension is compatible only with the target platform and Python/NumPy ABI
+represented by the sandbox image. It is never loaded automatically.

@@ -12,8 +12,9 @@ bounded source snapshot
   -> unaccepted NumPy/Numba candidates
   -> static artifact verification
   -> container-only F2PY oracle and differential cases
-  -> verified-candidate benchmarking (next milestone)
-  -> JSON/HTML report and selected hybrid package (next milestone)
+  -> candidate-specific acceptance and verified-only benchmarking
+  -> explicit compiled fallback bridge
+  -> hash-bound JSON/HTML evidence report
 ```
 
 Analysis and generation operate on the same bounded, root-anchored in-memory
@@ -39,6 +40,12 @@ path during migration.
 - `runtime/sandbox.py` is the only native execution boundary.
 - `verify/native.py` compiles the captured original with F2PY and compares
   bounded cases inside hardened Docker containers.
+- `benchmark/runner.py` validates evidence linkage, times verified candidates in
+  the same pinned image, and lets the serial baseline remain the winner.
+- `fallback.py` builds platform-specific retained-Fortran extensions only inside
+  the sandbox; generated packages require explicit binding.
+- `report/render.py` joins validated evidence into deterministic JSON and
+  escaped, self-contained HTML.
 - `models.py` owns the versioned evidence vocabulary; `project.py` and `cli.py`
   are the public Python and command-line boundaries.
 
@@ -57,6 +64,7 @@ modern/
 ├── pyproject.toml
 └── src/vamc_modernized/
     ├── __init__.py
+    ├── _fallback.py               # explicit native binding; no implicit import
     ├── _runtime.py
     ├── <source-module>.py         # readable serial baseline
     └── _candidates/              # never selected before verification
@@ -69,6 +77,6 @@ benchmarking are separate states. A successfully parsed or generated routine is
 not called verified. A faster candidate may only be ranked after its recorded
 test domain passes under the selected numerical policy.
 
-Current limitation: the native harness verifies exported serial routines.
-Candidate-specific native acceptance, benchmark ranking, the compiled fallback
-bridge, and HTML reporting remain open milestones.
+The migration manifest excludes later verification, benchmark, fallback-binary,
+and report products so generating them cannot rewrite the source-to-output
+record. Downstream evidence binds upstream records with canonical SHA-256.

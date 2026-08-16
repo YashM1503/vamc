@@ -44,11 +44,27 @@ mismatches, infinity/sign mismatches, and structural mismatches. Boolean values
 are not silently coerced to integers. Tolerances must be non-negative and cannot
 be widened by generated code or an optional model.
 
-## Acceptance and benchmarking
+## Candidate acceptance and benchmarking
 
-Every accepted candidate must eventually record its source mapping,
-transformations, preconditions, policy, case count, seeds, maximum errors,
-mutation comparison, exceptions, and failing reproducer. Benchmarking is allowed
-only after candidate-specific verification succeeds. Candidate-specific native
-acceptance and benchmark ranking are not yet implemented in this pre-alpha
-build; generated candidates remain quarantined under `_candidates`.
+Every candidate retains its source mapping, transformations, and preconditions.
+Native verification executes it against the same oracle results used for the
+serial baseline and records policy, case count, maximum errors, mutation, and
+exception behavior. Failed candidates are rejected; unavailable candidates are
+not silently accepted.
+
+Benchmarking accepts only `VERIFIED_FOR_TEST_DOMAIN` candidates from an evidence
+record whose migration digest, normalized-case digest, and sandbox image match
+exactly. It warms implementations, records raw steady-state nanosecond samples
+and environment metadata, and ranks deterministically by median time and ID.
+The serial baseline participates, so an optimization is never selected merely
+because one was generated.
+
+Case inputs are user-authored domain contracts. Automatic scientific property
+generation is not part of the scoped MVP because VAMC cannot infer valid input
+domains safely from syntax alone.
+
+F2PY wrapper behavior is part of the oracle boundary. Some compiler/wrapper
+combinations reject otherwise valid edge domains such as zero-length explicit
+shape arrays. VAMC fails closed on an oracle/candidate exception mismatch; users
+should record such wrapper limits separately rather than treating them as a
+translation acceptance case.

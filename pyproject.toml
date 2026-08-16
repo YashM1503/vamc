@@ -90,4 +90,7 @@ strict = true
 files = ["src", "tests"]
 
 [tool.coverage.run]
-omit = ["src/vamc/verify/sandbox_runner.py"]
+omit = [
+  "src/vamc/verify/benchmark_runner.py",
+  "src/vamc/verify/sandbox_runner.py",
+]

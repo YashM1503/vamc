@@ -53,6 +53,46 @@ def _resolve(module: Any, entrypoint: str) -> Any:
     return target
 
 
+def _f2py_arguments(
+    routine: Any,
+    entrypoint: str,
+    positional: list[Any],
+    keywords: dict[str, Any],
+    argument_names: list[str],
+) -> tuple[list[Any], dict[str, Any]]:
+    """Map source-order inputs to the order documented by an F2PY wrapper."""
+
+    if len(positional) > len(argument_names) or any(
+        not isinstance(name, str) or not name.isidentifier() for name in argument_names
+    ):
+        raise ValueError("invalid authoritative argument-name mapping")
+    values = dict(zip(argument_names, positional, strict=False))
+    for name, value in keywords.items():
+        if name in values:
+            raise TypeError("argument supplied both positionally and by keyword")
+        values[name] = value
+    documentation = getattr(routine, "__doc__", None)
+    if not isinstance(documentation, str):
+        raise TypeError("F2PY wrapper has no inspectable signature")
+    marker = f"{entrypoint.split('.')[-1]}("
+    start = documentation.lower().find(marker.lower())
+    if start < 0:
+        raise TypeError("F2PY wrapper signature is unavailable")
+    start += len(marker)
+    end = documentation.find(")", start)
+    if end < 0:
+        raise TypeError("F2PY wrapper signature is malformed")
+    names = []
+    for raw in documentation[start:end].split(","):
+        name = raw.strip().strip("[]").split("=", 1)[0].strip()
+        if name:
+            if not name.isidentifier():
+                raise TypeError("F2PY wrapper signature is malformed")
+            names.append(name.lower())
+    lowered_values = {name.lower(): value for name, value in values.items()}
+    return [lowered_values[name] for name in names if name in lowered_values], {}
+
+
 def _write(path: Path, payload: dict[str, Any]) -> None:
     descriptor, temporary_name = tempfile.mkstemp(prefix=".vamc-result-", dir=path.parent)
     temporary = Path(temporary_name)
@@ -73,6 +113,7 @@ def main() -> int:
     parser.add_argument("--module", required=True)
     parser.add_argument("--module-root", action="append", default=[])
     parser.add_argument("--routine", required=True)
+    parser.add_argument("--f2py", action="store_true")
     parser.add_argument("--case", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     arguments = parser.parse_args()
@@ -88,7 +129,20 @@ def main() -> int:
     try:
         module = importlib.import_module(arguments.module)
         routine = _resolve(module, arguments.routine)
-        returned = routine(*positional, **keywords)
+        call_positional = positional
+        call_keywords = keywords
+        if arguments.f2py:
+            names = case.get("argument_names")
+            if not isinstance(names, list):
+                raise ValueError("F2PY call requires authoritative argument names")
+            call_positional, call_keywords = _f2py_arguments(
+                routine,
+                arguments.routine,
+                positional,
+                keywords,
+                names,
+            )
+        returned = routine(*call_positional, **call_keywords)
         payload = {
             "arguments": _encode(positional),
             "keywords": _encode(keywords),

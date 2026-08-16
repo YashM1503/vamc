@@ -28,6 +28,18 @@ All notable changes will be documented here.
 - Verification-gated NumPy, Numba serial, and Numba `prange` candidates.
 - `vamc migrate` and `vamc verify` CLI workflows plus `Project.migrate()` and
   `MigrationResult.verify()` Python APIs.
+- Candidate-specific differential acceptance with migration and normalized-case
+  evidence hashes.
+- Authoritative source-argument to F2PY wrapper adaptation for inferred and
+  reordered dimension arguments.
+- Verified-only, sandboxed benchmark ranking with warmups, repeated raw timings,
+  environment metadata, and serial-baseline selection.
+- Explicit generated fallback dispatch and container-only F2PY bridge builds
+  with hash-recorded, platform-specific artifacts.
+- Deterministic `modernization-report.json` and escaped, self-contained,
+  CSP-restricted `modernization-report.html` generation.
+- Public seed corpus, complete CLI documentation, MVP boundary, and contributor
+  extension guidance.
 
 ### Changed
 
@@ -42,3 +54,6 @@ All notable changes will be documented here.
 
 - Reject unsafe artifact paths, symlinked verification inputs, digest mismatches, oversized
   manifests and case files, unpinned sandbox images, and native verification on the host.
+- Reject stale or duplicate benchmark evidence, unverified candidates, mismatched
+  images/cases, symlinked compiler products, implicit fallback loading, and
+  unescaped report content.

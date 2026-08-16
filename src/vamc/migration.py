@@ -150,6 +150,7 @@ def migrate_project(
                         "",
                         "[project.optional-dependencies]",
                         'optimized = ["numpy>=2.4,<2.5", "numba>=0.66,<0.67"]',
+                        'fallback = ["numpy>=2.4,<2.5"]',
                         "",
                     )
                 ),
@@ -183,7 +184,9 @@ def migrate_project(
                         "",
                         "A routine appears in `fallback-registry.json` whenever VAMC could not",
                         "preserve its semantics.",
-                        "Fallback entries are not silently exposed as translated Python.",
+                        "Fallback entries dispatch only after a reviewed native extension is",
+                        "explicitly bound with `bind_fallback_path()` or `bind_fallback()`.",
+                        "No compiler or native module is invoked implicitly during import.",
                         "",
                         "Install for local review with `python -m pip install -e .`.",
                         "Review `modernization.json`, `analysis.json`, and source maps before",

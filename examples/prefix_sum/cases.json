@@ -1,0 +1,13 @@
+{
+  "schema_version": "0.1.0",
+  "cases": [
+    {
+      "id": "four-values",
+      "routine": "prefix_sum",
+      "arguments": [
+        {"kind": "scalar", "value": 4},
+        {"kind": "array", "dtype": "float64", "value": [1.0, 2.0, 3.0, 4.0]}
+      ]
+    }
+  ]
+}

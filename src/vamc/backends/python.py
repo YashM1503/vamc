@@ -115,6 +115,20 @@ def module_name(source_path: str) -> str:
     return f"{stem}_{suffix}"
 
 
+def _public_identifiers(names: set[str]) -> dict[str, str]:
+    """Avoid collisions between generated routines and fallback control APIs."""
+
+    used = {"bind_fallback", "bind_fallback_path", "fallback_available"}
+    selected: dict[str, str] = {}
+    for name in sorted(names):
+        candidate = _safe_identifier(name, prefix="routine")
+        while candidate in used:
+            candidate = f"fortran_{candidate}"
+        selected[name] = candidate
+        used.add(candidate)
+    return selected
+
+
 def _artifact(path: str, content: str) -> GeneratedArtifact:
     encoded = content.encode("utf-8")
     return GeneratedArtifact(path=path, content=content, sha256=hashlib.sha256(encoded).hexdigest())
@@ -456,6 +470,96 @@ def _vamc_size(value: Any, dimension: int | None = None) -> int:
 '''
 
 
+def _fallback_source(
+    records: dict[str, tuple[str, tuple[str, ...]]],
+    public_identifiers: dict[str, str],
+) -> str:
+    metadata = {
+        name: {"source_file": source, "reasons": list(reasons)}
+        for name, (source, reasons) in sorted(records.items())
+    }
+    lines = [
+        '"""Explicit bridge for routines retained as compiled Fortran."""',
+        "",
+        "from __future__ import annotations",
+        "",
+        "import importlib.util",
+        "from collections.abc import Callable, Mapping",
+        "from pathlib import Path",
+        "from types import ModuleType",
+        "from typing import Any",
+        "",
+        f"FALLBACKS = {metadata!r}",
+        "_entrypoints: dict[str, Callable[..., Any]] = {}",
+        "",
+        "",
+        "class FallbackUnavailableError(RuntimeError):",
+        '    """Raised until a reviewed native bridge is explicitly bound."""',
+        "",
+        "",
+        "def bind_fallback(",
+        "    module: ModuleType | None = None,",
+        "    *,",
+        "    entrypoints: Mapping[str, Callable[..., Any]] | None = None,",
+        ") -> None:",
+        '    """Bind reviewed native entrypoints; no module is imported implicitly."""',
+        "    selected: dict[str, Callable[..., Any]] = {}",
+        "    if module is not None:",
+        "        for name in FALLBACKS:",
+        "            value = vars(module).get(name)",
+        "            if callable(value):",
+        "                selected[name] = value",
+        "    if entrypoints is not None:",
+        "        for name, value in entrypoints.items():",
+        "            if name not in FALLBACKS or not callable(value):",
+        '                raise ValueError("fallback entrypoint is unknown or not callable")',
+        "            selected[name] = value",
+        "    _entrypoints.clear()",
+        "    _entrypoints.update(selected)",
+        "",
+        "",
+        "def bind_fallback_path(path: str | Path) -> None:",
+        '    """Explicitly load a locally reviewed ``_vamc_legacy`` extension."""',
+        "    selected = Path(path).expanduser()",
+        "    if selected.is_symlink() or not selected.is_file():",
+        '        raise ValueError("fallback extension must be a regular non-symlink file")',
+        '    spec = importlib.util.spec_from_file_location("_vamc_legacy", selected)',
+        "    if spec is None or spec.loader is None:",
+        '        raise ImportError("fallback extension cannot be loaded")',
+        "    module = importlib.util.module_from_spec(spec)",
+        "    spec.loader.exec_module(module)",
+        "    bind_fallback(module)",
+        "",
+        "",
+        "def fallback_available(routine: str) -> bool:",
+        '    """Return whether a native implementation is explicitly bound."""',
+        "    return routine in _entrypoints",
+        "",
+        "",
+        "def _call_fallback(routine: str, *args: Any, **kwargs: Any) -> Any:",
+        "    target = _entrypoints.get(routine)",
+        "    if target is None:",
+        "        reasons = ', '.join(FALLBACKS[routine]['reasons'])",
+        "        raise FallbackUnavailableError(",
+        '            f"native fallback for {routine!r} is not bound; reasons: {reasons}"',
+        "        )",
+        "    return target(*args, **kwargs)",
+    ]
+    for name in sorted(records):
+        safe = public_identifiers[name]
+        lines.extend(
+            (
+                "",
+                "",
+                f"def {safe}(*args: Any, **kwargs: Any) -> Any:",
+                f'    """Dispatch ``{name}`` to an explicitly bound native fallback."""',
+                f"    return _call_fallback({name!r}, *args, **kwargs)",
+            )
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
 def generate_python(
     analysis: AnalysisResult,
     sources: tuple[tuple[str, str], ...],
@@ -479,6 +583,12 @@ def generate_python(
     translations: list[RoutineTranslation] = []
     source_maps: list[SourceMapEntry] = []
     exported: dict[str, str] = {}
+    fallback_records: dict[str, tuple[str, tuple[str, ...]]] = {}
+    all_definitions: dict[str, int] = {}
+    for file_digest in analysis.files:
+        for routine_digest in file_digest.routines:
+            all_definitions[routine_digest.name] = all_definitions.get(routine_digest.name, 0) + 1
+    public_identifiers = _public_identifiers(set(all_definitions))
     package_path = f"src/{package_name}"
     artifacts.append(_artifact(f"{package_path}/_runtime.py", _RUNTIME_SOURCE))
 
@@ -521,6 +631,8 @@ def generate_python(
             if routine is None:
                 reasons.add("missing_authoritative_ir")
             if reasons:
+                if all_definitions[digest.name] == 1:
+                    fallback_records[digest.name] = (source_path, tuple(sorted(reasons)))
                 translations.append(
                     RoutineTranslation(
                         source_file=source_path,
@@ -534,6 +646,8 @@ def generate_python(
             try:
                 emitted = _RoutineEmitter(routine, digest, call_targets, module).emit()
             except UnsupportedPythonTranslation as error:
+                if all_definitions[digest.name] == 1:
+                    fallback_records[digest.name] = (source_path, (str(error),))
                 translations.append(
                     RoutineTranslation(
                         source_file=source_path,
@@ -577,14 +691,44 @@ def generate_python(
             _artifact(f"{package_path}/{module}.py", "\n".join(module_lines).rstrip() + "\n")
         )
 
-    init_lines = ['"""Public API for the VAMC-modernized package."""', ""]
+    artifacts.append(
+        _artifact(
+            f"{package_path}/_fallback.py",
+            _fallback_source(fallback_records, public_identifiers),
+        )
+    )
+    init_lines = [
+        '"""Public API for the VAMC-modernized package."""',
+        "",
+        "from ._fallback import (",
+        "    FALLBACKS,",
+        "    FallbackUnavailableError,",
+        "    bind_fallback,",
+        "    bind_fallback_path,",
+        "    fallback_available,",
+        ")",
+    ]
     for routine_name, module in sorted(exported.items()):
         safe = _safe_identifier(routine_name, prefix="routine")
-        init_lines.append(f"from .{module} import {safe}")
+        public = public_identifiers[routine_name]
+        alias = f" as {public}" if public != safe else ""
+        init_lines.append(f"from .{module} import {safe}{alias}")
+    for routine_name in sorted(fallback_records):
+        safe = public_identifiers[routine_name]
+        init_lines.append(f"from ._fallback import {safe}")
+    public_names = {
+        *(public_identifiers[name] for name in exported),
+        *(public_identifiers[name] for name in fallback_records),
+        "FALLBACKS",
+        "FallbackUnavailableError",
+        "bind_fallback",
+        "bind_fallback_path",
+        "fallback_available",
+    }
     init_lines.extend(
         (
             "",
-            f"__all__ = {sorted(_safe_identifier(name, prefix='routine') for name in exported)!r}",
+            f"__all__ = {sorted(public_names)!r}",
             "",
         )
     )

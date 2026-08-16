@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-VAMC is pre-alpha. Only the latest commit on `main` receives security fixes;
+VAMC is alpha. Only the latest commit on `main` receives security fixes;
 there is no supported package release yet.
 
 ## Reporting a vulnerability
@@ -16,13 +16,16 @@ We aim to acknowledge a report within 3 business days, provide an initial
 assessment within 10 business days, and coordinate disclosure after a fix is
 available. These are response targets, not guarantees for this volunteer alpha.
 
-The `analyze` command must never execute Fortran. Treat source execution,
+The `analyze` and `migrate` commands must never execute Fortran. Treat source execution,
 reading outside the selected source root, following source symlinks, resource
 limit bypass, report-path clobbering, or a false claim of verified safety as a
 security defect.
 
 ## Scope
 
-Reports, source trees, and paths are untrusted. Generated-code execution is not
-implemented. When it is added, it will not be considered supported until the
-sandbox described in `docs/security-model.md` is implemented and reviewed.
+Reports, source trees, case files, compiler output, generated code, benchmark
+records, and paths are untrusted. Native oracle execution, generated-candidate
+execution, timing, and fallback compilation are supported only through the
+container boundary in `docs/security-model.md`. Any host-execution fallback,
+unpinned image, network-enabled execution, evidence-link bypass, or implicit
+native import is a security defect.

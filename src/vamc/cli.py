@@ -10,8 +10,12 @@ from pathlib import Path
 
 from vamc import __version__
 from vamc.analysis.inventory import AnalysisError
+from vamc.benchmark import benchmark_migration_directory
 from vamc.config import AnalysisConfig
+from vamc.fallback import build_fallback
+from vamc.models import FallbackBuildStatus
 from vamc.project import Project
+from vamc.report import build_report
 from vamc.verify import scientific_default_policy, strict_policy, verify_migration_directory
 from vamc.verify.native import verify_native_directory
 
@@ -111,6 +115,51 @@ def _parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="replace an existing report without following symlinks"
     )
     verify.set_defaults(handler=_run_verify)
+
+    benchmark = subparsers.add_parser(
+        "benchmark", help="benchmark only candidates verified for the exact case set"
+    )
+    benchmark.add_argument("path", type=Path, help="materialized migration directory")
+    benchmark.add_argument("--verification", type=Path, required=True)
+    benchmark.add_argument("--cases", type=Path, required=True)
+    benchmark.add_argument("--sandbox-image", required=True)
+    benchmark.add_argument("--warmups", type=int, default=2)
+    benchmark.add_argument("--repeats", type=int, default=7)
+    benchmark.add_argument("--iterations", type=int, default=10)
+    benchmark.add_argument("--json", action="store_true", help="write the report to stdout")
+    benchmark.add_argument("--output", type=Path, help="write benchmark JSON to this file")
+    benchmark.add_argument(
+        "--force", action="store_true", help="replace an existing report without following symlinks"
+    )
+    benchmark.set_defaults(handler=_run_benchmark)
+
+    report = subparsers.add_parser(
+        "report", help="render validated migration evidence as JSON and self-contained HTML"
+    )
+    report.add_argument("path", type=Path, help="materialized migration directory")
+    report.add_argument("--verification", type=Path)
+    report.add_argument("--benchmark", type=Path)
+    report.add_argument(
+        "--output-dir",
+        type=Path,
+        help="destination directory (default: PATH/reports)",
+    )
+    report.add_argument("--json", action="store_true", help="also write report JSON to stdout")
+    report.add_argument(
+        "--force",
+        action="store_true",
+        help="replace existing report files without following symlinks",
+    )
+    report.set_defaults(handler=_run_report)
+
+    fallback = subparsers.add_parser(
+        "build-fallback", help="compile retained Fortran in Docker into a reviewed bridge"
+    )
+    fallback.add_argument("path", type=Path, help="materialized migration directory")
+    fallback.add_argument("--output", type=Path, required=True)
+    fallback.add_argument("--sandbox-image", required=True)
+    fallback.add_argument("--json", action="store_true", help="write the build record to stdout")
+    fallback.set_defaults(handler=_run_build_fallback)
     return parser
 
 
@@ -199,6 +248,79 @@ def _run_verify(args: argparse.Namespace) -> int:
     if report.summary.failed:
         return 1
     if args.cases and report.summary.unavailable:
+        return 3
+    return 0
+
+
+def _run_benchmark(args: argparse.Namespace) -> int:
+    report = benchmark_migration_directory(
+        args.path,
+        args.cases,
+        args.verification,
+        image=args.sandbox_image,
+        warmups=args.warmups,
+        repeats=args.repeats,
+        iterations=args.iterations,
+    )
+    rendered = json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n"
+    if args.output:
+        _atomic_write(args.output, rendered, overwrite=args.force)
+    if args.json:
+        sys.stdout.write(rendered)
+    else:
+        print(
+            f"Benchmarked {report.summary.benchmarked_candidates}/"
+            f"{report.summary.eligible_candidates} verified candidate(s)."
+        )
+        for selection in report.selections:
+            print(
+                f"Selected {selection.candidate_id} for {selection.routine}: "
+                f"{selection.speedup_over_serial:.3f}x serial."
+            )
+        if args.output:
+            print(f"Wrote {args.output}")
+    return 3 if report.summary.unavailable_candidates else 0
+
+
+def _run_report(args: argparse.Namespace) -> int:
+    bundle = build_report(
+        args.path,
+        verification_path=args.verification,
+        benchmark_path=args.benchmark,
+    )
+    output_directory = args.output_dir or args.path / "reports"
+    json_path = output_directory / "modernization-report.json"
+    html_path = output_directory / "modernization-report.html"
+    for destination in (json_path, html_path):
+        if not args.force and (destination.exists() or destination.is_symlink()):
+            raise AnalysisError(f"output already exists (use --force): {destination}")
+    _atomic_write(json_path, bundle.json_text, overwrite=args.force)
+    _atomic_write(html_path, bundle.html_text, overwrite=args.force)
+    if args.json:
+        sys.stdout.write(bundle.json_text)
+    else:
+        print(f"Wrote {json_path}")
+        print(f"Wrote {html_path}")
+    return 0
+
+
+def _run_build_fallback(args: argparse.Namespace) -> int:
+    report = build_fallback(
+        args.path,
+        args.output,
+        image=args.sandbox_image,
+    )
+    if args.json:
+        sys.stdout.write(json.dumps(report.to_dict(), indent=2, sort_keys=True) + "\n")
+    else:
+        print(f"Fallback build status: {report.status.value}")
+        if report.status is FallbackBuildStatus.BUILT:
+            print(f"Wrote {args.output}")
+        for diagnostic in report.diagnostics:
+            print(diagnostic)
+    if report.status is FallbackBuildStatus.FAILED:
+        return 1
+    if report.status is FallbackBuildStatus.UNAVAILABLE:
         return 3
     return 0
 
