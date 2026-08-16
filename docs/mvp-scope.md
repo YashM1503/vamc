@@ -26,7 +26,7 @@ VAMC's documented Fortran subset. Every stage is independently usable:
 - Native steps require a working Docker daemon and a reviewed digest-pinned image.
 - Fallback binaries are not hardware-neutral; build one per target platform and ABI.
 - Benchmark selection is local evidence, not a portable speed guarantee.
-- There is no LLM correctness authority, telemetry, hosted service, GPU, MPI,
+- There is no external correctness authority, telemetry, hosted service, GPU, MPI,
   native Windows, or arbitrary mixed-language build support.
 
 The repository is suitable for public collaboration and controlled evaluation.

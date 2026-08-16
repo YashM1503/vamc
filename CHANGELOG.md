@@ -40,6 +40,8 @@ All notable changes will be documented here.
   CSP-restricted `modernization-report.html` generation.
 - Public seed corpus, complete CLI documentation, MVP boundary, and contributor
   extension guidance.
+- A documentation index linking every public usage, assurance, contribution,
+  support, and release guide.
 
 ### Changed
 
@@ -57,3 +59,5 @@ All notable changes will be documented here.
 - Reject stale or duplicate benchmark evidence, unverified candidates, mismatched
   images/cases, symlinked compiler products, implicit fallback loading, and
   unescaped report content.
+- Exercise malformed report and benchmark evidence boundaries across the supported
+  Python matrix without lowering the coverage gate.
