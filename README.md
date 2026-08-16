@@ -11,7 +11,7 @@ source maps, explicit hybrid fallback dispatch, static artifact verification, a
 container-only F2PY differential harness, verification-gated NumPy/Numba
 candidates, reproducible benchmark ranking, and self-contained reports.
 
-> LLMs can propose. Evidence decides.
+> Proposals are provisional. Evidence decides.
 
 ## Current status
 
@@ -112,10 +112,9 @@ report = build_report(
 - “Verified” will always name the exercised contract, test domain, and
   numerical policy; differential testing is not formal proof.
 
-See [the security model](https://github.com/YashM1503/vamc/blob/main/docs/security-model.md),
-[verification semantics](https://github.com/YashM1503/vamc/blob/main/docs/verification-semantics.md),
-[architecture](https://github.com/YashM1503/vamc/blob/main/docs/architecture.md), and the
-[CLI reference](https://github.com/YashM1503/vamc/blob/main/docs/cli.md).
+See [the security model](docs/security-model.md),
+[verification semantics](docs/verification-semantics.md),
+[architecture](docs/architecture.md), and the [CLI reference](docs/cli.md).
 
 ## MVP boundary
 
@@ -129,14 +128,17 @@ post-MVP work. See [the precise MVP boundary](docs/mvp-scope.md).
 The north-star metric is zero known unsafe loops marked safe on the benchmark
 corpus.
 
+## Documentation
+
+The [documentation index](docs/README.md) links every public usage, architecture,
+security, extension, contribution, support, and release guide shipped with VAMC.
+
 ## Contributing
 
-Read [CONTRIBUTING.md](https://github.com/YashM1503/vamc/blob/main/CONTRIBUTING.md).
-Security reports should follow
-[SECURITY.md](https://github.com/YashM1503/vamc/blob/main/SECURITY.md), not a public issue.
-Maintainers should use the
-[public release checklist](https://github.com/YashM1503/vamc/blob/main/docs/release-checklist.md).
+Read [CONTRIBUTING.md](CONTRIBUTING.md). Security reports should follow
+[SECURITY.md](SECURITY.md), not a public issue. Maintainers should use the
+[public release checklist](docs/release-checklist.md).
 
 ## License
 
-Apache-2.0. See [LICENSE](https://github.com/YashM1503/vamc/blob/main/LICENSE).
+Apache-2.0. See [LICENSE](LICENSE).

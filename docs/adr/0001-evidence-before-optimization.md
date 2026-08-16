@@ -12,8 +12,8 @@ indexing, floating-point, or state semantics.
 
 VAMC separates candidate generation, verification, and benchmarking. A candidate
 cannot enter benchmark ranking until it passes the configured verification
-contract. Unknown loop dependencies fail closed. LLM output is treated only as
-a candidate proposal.
+contract. Unknown loop dependencies fail closed. Generated optimization output
+is treated only as a candidate proposal.
 
 ## Consequences
 
