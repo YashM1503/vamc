@@ -1,0 +1,15 @@
+{
+  "schema_version": "0.1.0",
+  "cases": [
+    {
+      "id": "small-positive",
+      "routine": "daxpy",
+      "arguments": [
+        {"kind": "scalar", "value": 3},
+        {"kind": "scalar", "value": 2.0},
+        {"kind": "array", "dtype": "float64", "value": [1.0, 2.0, 3.0]},
+        {"kind": "array", "dtype": "float64", "value": [10.0, 20.0, 30.0]}
+      ]
+    }
+  ]
+}

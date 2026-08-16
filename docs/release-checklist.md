@@ -1,6 +1,6 @@
 # Release checklist
 
-The repository is public experimental pre-alpha software. Publishing a package
+The repository is public experimental alpha software. Publishing a package
 is a separate, later decision.
 
 ## Public repository record (2026-08-10)
@@ -27,13 +27,17 @@ is a separate, later decision.
 - [ ] Create a matching changelog section, CFF version/date, signed tag, and
   GitHub release. Do not publish from a developer token.
 
-## Product work that remains intentionally out of scope
+## Scoped MVP record
 
-- Replace the lexical scanner with an authoritative Fortran frontend.
-- Implement serial translation, native-Fortran oracle execution in a hardened
-  sandbox, differential verification, dependency analysis, and only then
-  parallel/optimized candidates.
-- Add a representative Fortran golden corpus and parser-differential tests.
+- [x] Authoritative PSyclone/fparser2 frontend and bounded semantic inventory.
+- [x] Deterministic serial translation, source maps, and fail-closed dependency analysis.
+- [x] Hardened container-only F2PY oracle and candidate-specific verification.
+- [x] Verified-only benchmark ranking with environment and raw-sample evidence.
+- [x] Explicit compiled fallback bridge and deterministic JSON/HTML reports.
+- [x] Public seed corpus and parser/property/security regression tests.
 
-Until those product stages exist, no output may claim translated, verified, or
-parallel-safe code.
+Before a stable package release, expand the real-world corpus, run the live
+native matrix on each supported deployment architecture, commission an
+independent sandbox review, define schema compatibility policy, and complete the
+unchecked package release gates above. Domain-scoped verification must never be
+presented as formal or universal correctness.

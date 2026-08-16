@@ -5,7 +5,8 @@
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
-ARG NUMPY_VERSION=2.3.2
+ARG NUMPY_VERSION=2.4.6
+ARG NUMBA_VERSION=0.66.0
 ARG MESON_VERSION=1.8.3
 ARG NINJA_VERSION=1.13.0
 
@@ -18,6 +19,7 @@ RUN apt-get update \
 
 RUN python -m pip install --no-cache-dir \
     "numpy==${NUMPY_VERSION}" \
+    "numba==${NUMBA_VERSION}" \
     "meson==${MESON_VERSION}" \
     "ninja==${NINJA_VERSION}"
 

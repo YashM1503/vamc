@@ -29,6 +29,13 @@ _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _MAX_TOTAL_BYTES = 256 * 1024 * 1024
 
 
+def manifest_digest(manifest: dict[str, Any]) -> str:
+    """Hash a canonical JSON representation of a migration manifest."""
+
+    encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _safe_relative(value: str) -> PurePosixPath:
     path = PurePosixPath(value)
     if path.is_absolute() or not path.parts or any(part in {"", ".", ".."} for part in path.parts):
@@ -95,9 +102,26 @@ def _verify(
     policy: NumericalPolicy,
 ) -> VerificationReport:
     failures: list[str] = []
+    if manifest.get("schema_version") != "0.1.0":
+        raise AnalysisError("migration manifest schema is not supported")
     declared = manifest.get("artifacts")
-    if not isinstance(declared, list):
-        raise AnalysisError("migration manifest has no artifact inventory")
+    routines = manifest.get("routines")
+    candidates = manifest.get("candidates")
+    source_maps = manifest.get("source_maps")
+    if (
+        not isinstance(declared, list)
+        or not isinstance(routines, list)
+        or not isinstance(candidates, list)
+        or not isinstance(source_maps, list)
+    ):
+        raise AnalysisError("migration manifest has an invalid record inventory")
+    artifact_paths = [item.get("path") for item in declared if isinstance(item, dict)]
+    if (
+        len(artifact_paths) != len(declared)
+        or any(not isinstance(path, str) for path in artifact_paths)
+        or len(artifact_paths) != len(set(artifact_paths))
+    ):
+        raise AnalysisError("migration manifest artifact identities are invalid or duplicated")
     for item in declared:
         if not isinstance(item, dict) or not isinstance(item.get("path"), str):
             raise AnalysisError("migration manifest contains an invalid artifact entry")
@@ -117,16 +141,34 @@ def _verify(
             except (SyntaxError, UnicodeDecodeError):
                 failures.append(f"invalid generated Python: {path}")
 
-    maps_by_routine = {
-        (item.get("source_file"), item.get("routine")): item
-        for item in manifest.get("source_maps", [])
-        if isinstance(item, dict)
-    }
+    maps_by_routine: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in source_maps:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("source_file"), str)
+            or not isinstance(item.get("routine"), str)
+        ):
+            raise AnalysisError("migration manifest contains an invalid source-map entry")
+        map_identity = (item["source_file"], item["routine"])
+        if map_identity in maps_by_routine:
+            raise AnalysisError("migration manifest contains duplicate source-map identities")
+        maps_by_routine[map_identity] = item
     routine_results: list[RoutineVerification] = []
-    for item in manifest.get("routines", []):
-        if not isinstance(item, dict) or not isinstance(item.get("routine"), str):
+    routine_identities: set[tuple[str, str]] = set()
+    for item in routines:
+        source_file = item.get("source_file") if isinstance(item, dict) else None
+        routine_value = item.get("routine") if isinstance(item, dict) else None
+        if (
+            not isinstance(item, dict)
+            or not isinstance(source_file, str)
+            or not isinstance(routine_value, str)
+        ):
             raise AnalysisError("migration manifest contains an invalid routine entry")
-        routine = item["routine"]
+        routine = routine_value
+        identity = (source_file, routine)
+        if identity in routine_identities:
+            raise AnalysisError("migration manifest contains duplicate routine identities")
+        routine_identities.add(identity)
         if item.get("status") != "TRANSLATED":
             routine_results.append(
                 RoutineVerification(
@@ -140,7 +182,7 @@ def _verify(
             )
             continue
         generated_file = item.get("generated_file")
-        mapping = maps_by_routine.get((item.get("source_file"), routine))
+        mapping = maps_by_routine.get((source_file, routine))
         routine_failures = []
         if not isinstance(generated_file, str) or generated_file not in contents:
             routine_failures.append("generated file is missing")
@@ -165,7 +207,8 @@ def _verify(
 
     statuses = [item.status for item in routine_results]
     candidate_results: list[CandidateVerification] = []
-    for item in manifest.get("candidates", []):
+    candidate_ids: set[str] = set()
+    for item in candidates:
         if (
             not isinstance(item, dict)
             or not isinstance(item.get("id"), str)
@@ -173,6 +216,9 @@ def _verify(
             or not isinstance(item.get("backend"), str)
         ):
             raise AnalysisError("migration manifest contains an invalid candidate entry")
+        if item["id"] in candidate_ids:
+            raise AnalysisError("migration manifest contains duplicate candidate identities")
+        candidate_ids.add(item["id"])
         generated_file = item.get("generated_file")
         candidate_failures = []
         if not isinstance(generated_file, str) or generated_file not in contents:
@@ -209,8 +255,10 @@ def _verify(
     else:
         overall = VerificationStatus.UNAVAILABLE
     return VerificationReport(
-        schema_version="0.1.0",
+        schema_version="0.2.0",
         migration_schema_version=str(manifest.get("schema_version", "UNKNOWN")),
+        migration_sha256=manifest_digest(manifest),
+        cases_sha256=None,
         status=overall,
         sandbox="none (static analysis only)",
         sandbox_image=None,
@@ -269,7 +317,7 @@ def _load_migration_directory(path: str | Path) -> tuple[dict[str, Any], dict[st
         )
         try:
             manifest = json.loads(raw_manifest)
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
             raise AnalysisError("modernization.json is not valid UTF-8 JSON") from error
         if not isinstance(manifest, dict):
             raise AnalysisError("modernization.json must contain a JSON object")

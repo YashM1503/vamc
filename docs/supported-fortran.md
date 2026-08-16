@@ -35,6 +35,11 @@ Array sections, unknown automatic-array shapes, unsupported intrinsics, partial
 PSyIR `CodeBlock` regions, ambiguous routine names, and any unimplemented node
 also require fallback. No partial routine is emitted as if complete.
 
+Generated fallback wrappers are public but raise `FallbackUnavailableError`
+until a reviewed callable or container-built `_vamc_legacy` extension is bound
+explicitly. The bridge preserves operational access to unsupported routines
+without mislabeling them as Python translations.
+
 ## Dependency and candidate analysis
 
 Loops are labeled `MAP`, `REDUCTION`, `STENCIL`, `RECURRENCE`, `SIDE_EFFECT`, or

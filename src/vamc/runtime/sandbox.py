@@ -6,6 +6,7 @@ import os
 import re
 import selectors
 import shutil
+import stat
 import subprocess  # nosec B404
 import time
 from dataclasses import dataclass
@@ -31,12 +32,24 @@ class SandboxLimits:
     memory_megabytes: int = 1024
     pids: int = 64
     file_megabytes: int = 256
+    write_megabytes: int = 256
+    write_entries: int = 100_000
     output_bytes: int = 1024 * 1024
 
     def __post_init__(self) -> None:
         if self.wall_seconds <= 0 or self.cpus <= 0:
             raise ValueError("sandbox time and CPU limits must be positive")
-        if min(self.memory_megabytes, self.pids, self.file_megabytes, self.output_bytes) <= 0:
+        if (
+            min(
+                self.memory_megabytes,
+                self.pids,
+                self.file_megabytes,
+                self.write_megabytes,
+                self.write_entries,
+                self.output_bytes,
+            )
+            <= 0
+        ):
             raise ValueError("sandbox resource limits must be positive")
 
 
@@ -47,10 +60,16 @@ class SandboxResult:
     output: str
     timed_out: bool
     output_limited: bool
+    storage_limited: bool = False
 
     @property
     def succeeded(self) -> bool:
-        return self.returncode == 0 and not self.timed_out and not self.output_limited
+        return (
+            self.returncode == 0
+            and not self.timed_out
+            and not self.output_limited
+            and not self.storage_limited
+        )
 
 
 @dataclass(frozen=True)
@@ -145,12 +164,19 @@ class DockerSandbox:
         mounts: tuple[SandboxMount, ...] = (),
         working_directory: str = "/work",
     ) -> SandboxResult:
+        writable_roots = tuple(mount.source.resolve() for mount in mounts if not mount.read_only)
         return self._run(
             self.command(arguments, mounts=mounts, working_directory=working_directory),
             self.limits.wall_seconds,
+            writable_roots,
         )
 
-    def _run(self, command: tuple[str, ...], timeout: float) -> SandboxResult:
+    def _run(
+        self,
+        command: tuple[str, ...],
+        timeout: float,
+        writable_roots: tuple[Path, ...] = (),
+    ) -> SandboxResult:
         environment = {
             key: value for key, value in os.environ.items() if key in _SAFE_ENVIRONMENT_KEYS
         }
@@ -171,6 +197,7 @@ class DockerSandbox:
         captured = bytearray()
         timed_out = False
         output_limited = False
+        storage_limited = False
         while process.poll() is None:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -187,12 +214,26 @@ class DockerSandbox:
                         break
             if output_limited:
                 break
+            if _writable_limit_exceeded(
+                writable_roots,
+                self.limits.write_megabytes * 1024 * 1024,
+                self.limits.write_entries,
+            ):
+                storage_limited = True
+                process.kill()
+                break
         process.wait()
         remaining_output = process.stdout.read(self.limits.output_bytes + 1 - len(captured))
         captured.extend(remaining_output)
         if len(captured) > self.limits.output_bytes:
             output_limited = True
             del captured[self.limits.output_bytes :]
+        if _writable_limit_exceeded(
+            writable_roots,
+            self.limits.write_megabytes * 1024 * 1024,
+            self.limits.write_entries,
+        ):
+            storage_limited = True
         selector.close()
         return SandboxResult(
             command=command,
@@ -200,4 +241,38 @@ class DockerSandbox:
             output=captured.decode("utf-8", errors="replace"),
             timed_out=timed_out,
             output_limited=output_limited,
+            storage_limited=storage_limited,
         )
+
+
+def _writable_limit_exceeded(roots: tuple[Path, ...], byte_limit: int, entry_limit: int) -> bool:
+    """Bound aggregate regular-file bytes and entries without following links."""
+
+    total = 0
+    entries = 0
+    pending = list(roots)
+    while pending:
+        directory = pending.pop()
+        try:
+            with os.scandir(directory) as children:
+                for child in children:
+                    entries += 1
+                    if entries > entry_limit:
+                        return True
+                    try:
+                        metadata = child.stat(follow_symlinks=False)
+                    except FileNotFoundError:
+                        continue
+                    except OSError:
+                        return True
+                    if stat.S_ISDIR(metadata.st_mode):
+                        pending.append(Path(child.path))
+                    elif stat.S_ISREG(metadata.st_mode):
+                        total += metadata.st_size
+                        if total > byte_limit:
+                            return True
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return True
+    return False

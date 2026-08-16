@@ -1,0 +1,13 @@
+{
+  "schema_version": "0.1.0",
+  "cases": [
+    {
+      "id": "mixed-values",
+      "routine": "sum_squares",
+      "arguments": [
+        {"kind": "scalar", "value": 4},
+        {"kind": "array", "dtype": "float64", "value": [-2.0, -1.0, 0.0, 3.0]}
+      ]
+    }
+  ]
+}

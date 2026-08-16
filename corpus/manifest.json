@@ -1,0 +1,9 @@
+{
+  "schema_version": "0.1.0",
+  "projects": [
+    {"path": "examples/clamp", "expected_routines": 1},
+    {"path": "examples/daxpy", "expected_routines": 1},
+    {"path": "examples/prefix_sum", "expected_routines": 1},
+    {"path": "examples/sum_squares", "expected_routines": 1}
+  ]
+}

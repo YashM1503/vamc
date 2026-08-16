@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -50,4 +51,16 @@ def test_verifier_rejects_symlinked_artifact(tmp_path: Path) -> None:
         pytest.skip("symlinks are not available")
 
     with pytest.raises(AnalysisError, match="safely read"):
+        verify_migration_directory(output)
+
+
+def test_verifier_rejects_duplicate_manifest_identities(tmp_path: Path) -> None:
+    example = Path(__file__).parents[2] / "examples" / "daxpy"
+    output = Project.from_path(example).migrate().write(tmp_path / "modern")
+    manifest_path = output / "modernization.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"].append(manifest["artifacts"][0])
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(AnalysisError, match="duplicated"):
         verify_migration_directory(output)

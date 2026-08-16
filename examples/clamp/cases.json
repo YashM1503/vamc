@@ -1,0 +1,15 @@
+{
+  "schema_version": "0.1.0",
+  "cases": [
+    {
+      "id": "negative",
+      "routine": "clamp",
+      "arguments": [{"kind": "scalar", "value": -4.0}]
+    },
+    {
+      "id": "positive",
+      "routine": "clamp",
+      "arguments": [{"kind": "scalar", "value": 9.0}]
+    }
+  ]
+}

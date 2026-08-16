@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -12,6 +13,8 @@ from typing import Any
 
 from vamc.analysis.inventory import AnalysisError
 from vamc.models import (
+    CandidateBackend,
+    CandidateVerification,
     ComparisonMetrics,
     NumericalPolicy,
     RoutineVerification,
@@ -21,7 +24,12 @@ from vamc.models import (
 )
 from vamc.runtime.sandbox import DockerSandbox, SandboxMount
 from vamc.verify.compare import compare_values, scientific_default_policy
-from vamc.verify.static import _load_migration_directory, verify_migration_directory
+from vamc.verify.io import read_regular_file
+from vamc.verify.static import (
+    _load_migration_directory,
+    manifest_digest,
+    verify_migration_directory,
+)
 
 _FORTRAN_SUFFIXES = {".f", ".f03", ".f08", ".f77", ".f90", ".f95", ".for", ".ftn"}
 _MAX_CASE_FILE_BYTES = 4 * 1024 * 1024
@@ -56,7 +64,15 @@ def _read_case_file(path: Path) -> dict[str, Any]:
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > _MAX_CASE_FILE_BYTES:
             raise AnalysisError("verification case file is not regular or exceeds its size limit")
-        data = os.read(descriptor, _MAX_CASE_FILE_BYTES + 1)
+        chunks: list[bytes] = []
+        remaining = _MAX_CASE_FILE_BYTES + 1
+        while remaining:
+            chunk = os.read(descriptor, min(64 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        data = b"".join(chunks)
         if len(data) > _MAX_CASE_FILE_BYTES:
             raise AnalysisError("verification case file exceeds its size limit")
     finally:
@@ -107,7 +123,10 @@ def load_cases(path: str | Path) -> tuple[VerificationCase, ...]:
         if (
             not isinstance(arguments, list)
             or not isinstance(keywords, dict)
-            or any(not isinstance(key, str) or not key.isidentifier() for key in keywords)
+            or any(
+                not isinstance(key, str) or not key.isidentifier() or key != key.lower()
+                for key in keywords
+            )
         ):
             raise AnalysisError("verification case arguments or keywords are invalid")
         cases.append(
@@ -148,11 +167,32 @@ def _combine(comparisons: list[ComparisonMetrics]) -> ComparisonMetrics:
     )
 
 
+def cases_digest(cases: tuple[VerificationCase, ...]) -> str:
+    """Hash the normalized case contract used for differential verification."""
+
+    payload = [
+        {
+            "arguments": list(case.arguments),
+            "id": case.identifier,
+            "keywords": case.keywords,
+            "oracle_routine": case.oracle_routine,
+            "routine": case.routine,
+        }
+        for case in cases
+    ]
+    encoded = json.dumps(payload, allow_nan=True, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _report(
     manifest: dict[str, Any],
     states: dict[str, _RoutineState],
+    candidate_states: dict[str, _RoutineState],
     policy: NumericalPolicy,
     image: str,
+    case_sha256: str,
     global_diagnostic: str | None = None,
 ) -> VerificationReport:
     results: list[RoutineVerification] = []
@@ -187,6 +227,46 @@ def _report(
             )
         )
     statuses = [item.status for item in results]
+    candidate_results: list[CandidateVerification] = []
+    for item in manifest.get("candidates", []):
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("id"), str)
+            or not isinstance(item.get("routine"), str)
+            or not isinstance(item.get("backend"), str)
+        ):
+            continue
+        identifier = item["id"]
+        state = candidate_states.setdefault(identifier, _RoutineState())
+        if global_diagnostic:
+            state.diagnostics.append(global_diagnostic)
+        metrics = _combine(state.comparisons)
+        if state.diagnostics:
+            status = VerificationStatus.FAILED if state.cases else VerificationStatus.UNAVAILABLE
+        elif state.cases and metrics.equal:
+            status = VerificationStatus.VERIFIED_FOR_TEST_DOMAIN
+        elif state.cases:
+            status = VerificationStatus.FAILED
+        else:
+            status = VerificationStatus.UNAVAILABLE
+            state.diagnostics.append("no differential cases supplied")
+        try:
+            backend = CandidateBackend(item["backend"])
+        except ValueError:
+            continue
+        candidate_results.append(
+            CandidateVerification(
+                candidate_id=identifier,
+                routine=item["routine"],
+                backend=backend,
+                status=status,
+                cases=state.cases,
+                policy=policy,
+                metrics=metrics,
+                diagnostics=tuple(dict.fromkeys(state.diagnostics)),
+            )
+        )
+    candidate_statuses = [item.status for item in candidate_results]
     if VerificationStatus.FAILED in statuses:
         overall = VerificationStatus.FAILED
     elif VerificationStatus.VERIFIED_FOR_TEST_DOMAIN in statuses:
@@ -194,8 +274,10 @@ def _report(
     else:
         overall = VerificationStatus.UNAVAILABLE
     return VerificationReport(
-        schema_version="0.1.0",
+        schema_version="0.2.0",
         migration_schema_version=str(manifest.get("schema_version", "UNKNOWN")),
+        migration_sha256=manifest_digest(manifest),
+        cases_sha256=case_sha256,
         status=overall,
         sandbox="docker (network disabled, read-only, capability-free)",
         sandbox_image=image,
@@ -206,14 +288,21 @@ def _report(
             verified_for_test_domain=statuses.count(VerificationStatus.VERIFIED_FOR_TEST_DOMAIN),
             failed=statuses.count(VerificationStatus.FAILED),
             unavailable=statuses.count(VerificationStatus.UNAVAILABLE),
+            candidates_verified=candidate_statuses.count(
+                VerificationStatus.VERIFIED_FOR_TEST_DOMAIN
+            ),
+            candidates_rejected=candidate_statuses.count(VerificationStatus.FAILED),
+            candidates_unavailable=candidate_statuses.count(VerificationStatus.UNAVAILABLE),
         ),
+        candidates=tuple(candidate_results),
     )
 
 
-def _write_case(directory: Path, case: VerificationCase) -> Path:
+def _write_case(directory: Path, case: VerificationCase, argument_names: tuple[str, ...]) -> Path:
     path = directory / "case.json"
     payload = {
         "arguments": list(case.arguments),
+        "argument_names": list(argument_names),
         "keywords": case.keywords,
     }
     with path.open("x", encoding="utf-8") as stream:
@@ -231,23 +320,27 @@ def _run_one(
     module_source: Path,
     case_directory: Path,
     output_directory: Path,
+    f2py: bool = False,
 ) -> dict[str, Any] | None:
     runner = Path(__file__).with_name("sandbox_runner.py").parent
+    arguments = [
+        "python",
+        "/runner/sandbox_runner.py",
+        "--module-root",
+        module_root,
+        "--module",
+        module,
+        "--routine",
+        routine,
+        "--case",
+        "/case/case.json",
+        "--output",
+        "/result/result.json",
+    ]
+    if f2py:
+        arguments.append("--f2py")
     result = sandbox.run(
-        (
-            "python",
-            "/runner/sandbox_runner.py",
-            "--module-root",
-            module_root,
-            "--module",
-            module,
-            "--routine",
-            routine,
-            "--case",
-            "/case/case.json",
-            "--output",
-            "/result/result.json",
-        ),
+        tuple(arguments),
         mounts=(
             SandboxMount(runner, "/runner", True),
             SandboxMount(module_source, module_root, True),
@@ -256,11 +349,13 @@ def _run_one(
         ),
         working_directory="/result",
     )
-    output = output_directory / "result.json"
-    if not result.succeeded or not output.is_file() or output.stat().st_size > _MAX_CASE_FILE_BYTES:
+    if not result.succeeded:
+        return None
+    data = read_regular_file(output_directory / "result.json", _MAX_CASE_FILE_BYTES)
+    if data is None:
         return None
     try:
-        decoded = json.loads(output.read_bytes())
+        decoded = json.loads(data)
     except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
         return None
     return decoded if isinstance(decoded, dict) else None
@@ -282,8 +377,30 @@ def verify_native_directory(
     if static.status is VerificationStatus.FAILED:
         raise AnalysisError("native verification refused because static verification failed")
     manifest, contents = _load_migration_directory(modern)
-    del contents
+    analysis_content = contents.get("analysis.json")
+    if analysis_content is None:
+        raise AnalysisError("migration has no authoritative argument evidence")
+    try:
+        analysis = json.loads(analysis_content)
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
+        raise AnalysisError("migration analysis evidence is invalid") from error
+    if not isinstance(analysis, dict) or not isinstance(analysis.get("files"), list):
+        raise AnalysisError("migration analysis evidence is invalid")
+    arguments_by_routine: dict[str, tuple[str, ...]] = {}
+    for source in analysis["files"]:
+        if not isinstance(source, dict) or not isinstance(source.get("routines"), list):
+            raise AnalysisError("migration analysis routine evidence is invalid")
+        for routine in source["routines"]:
+            if (
+                not isinstance(routine, dict)
+                or not isinstance(routine.get("name"), str)
+                or not isinstance(routine.get("arguments"), list)
+                or any(not isinstance(name, str) for name in routine["arguments"])
+            ):
+                raise AnalysisError("migration analysis argument evidence is invalid")
+            arguments_by_routine[routine["name"]] = tuple(routine["arguments"])
     cases = load_cases(cases_path)
+    case_sha256 = cases_digest(cases)
     translated = {
         item["routine"]
         for item in manifest.get("routines", [])
@@ -298,12 +415,23 @@ def verify_native_directory(
             )
     selected_sandbox = sandbox or DockerSandbox(image)
     states = {routine: _RoutineState() for routine in translated}
+    candidate_items = [
+        item
+        for item in manifest.get("candidates", [])
+        if isinstance(item, dict)
+        and isinstance(item.get("id"), str)
+        and isinstance(item.get("routine"), str)
+        and isinstance(item.get("generated_file"), str)
+    ]
+    candidate_states = {item["id"]: _RoutineState() for item in candidate_items}
     if not selected_sandbox.probe().succeeded:
         return _report(
             manifest,
             states,
+            candidate_states,
             selected_policy,
             image,
+            case_sha256,
             "Docker engine is unavailable; native verification did not run",
         )
 
@@ -318,12 +446,20 @@ def verify_native_directory(
     )
     if not source_paths:
         return _report(
-            manifest, states, selected_policy, image, "no captured Fortran sources are available"
+            manifest,
+            states,
+            candidate_states,
+            selected_policy,
+            image,
+            case_sha256,
+            "no captured Fortran sources are available",
         )
 
     with tempfile.TemporaryDirectory(prefix="vamc-oracle-") as oracle_name:
         oracle = Path(oracle_name)
         compile_arguments = (
+            "env",
+            "TMPDIR=/output",
             "python",
             "-m",
             "numpy.f2py",
@@ -346,8 +482,10 @@ def verify_native_directory(
             return _report(
                 manifest,
                 states,
+                candidate_states,
                 selected_policy,
                 image,
+                case_sha256,
                 "F2PY oracle compilation failed inside the sandbox",
             )
 
@@ -357,7 +495,12 @@ def verify_native_directory(
         for case in cases:
             with tempfile.TemporaryDirectory(prefix="vamc-case-") as case_name:
                 case_directory = Path(case_name)
-                _write_case(case_directory, case)
+                argument_names = arguments_by_routine.get(case.routine)
+                if argument_names is None:
+                    raise AnalysisError(
+                        f"migration has no argument evidence for routine: {case.routine}"
+                    )
+                _write_case(case_directory, case, argument_names)
                 oracle_result_dir = case_directory / "oracle-result"
                 candidate_result_dir = case_directory / "candidate-result"
                 oracle_result_dir.mkdir()
@@ -370,6 +513,7 @@ def verify_native_directory(
                     module_source=oracle,
                     case_directory=case_directory,
                     output_directory=oracle_result_dir,
+                    f2py=True,
                 )
                 candidate_result = _run_one(
                     selected_sandbox,
@@ -382,10 +526,61 @@ def verify_native_directory(
                 )
                 state = states[case.routine]
                 state.cases += 1
-                if oracle_result is None or candidate_result is None:
+                if oracle_result is None:
                     state.diagnostics.append(f"sandbox execution failed for case {case.identifier}")
+                    for candidate in candidate_items:
+                        if candidate["routine"] == case.routine:
+                            candidate_states[candidate["id"]].diagnostics.append(
+                                f"oracle execution failed for case {case.identifier}"
+                            )
                     continue
-                state.comparisons.append(
-                    compare_values(oracle_result, candidate_result, selected_policy)
-                )
-        return _report(manifest, states, selected_policy, image)
+                if candidate_result is None:
+                    state.diagnostics.append(f"sandbox execution failed for case {case.identifier}")
+                else:
+                    state.comparisons.append(
+                        compare_values(oracle_result, candidate_result, selected_policy)
+                    )
+                for index, candidate in enumerate(
+                    item for item in candidate_items if item["routine"] == case.routine
+                ):
+                    candidate_id = candidate["id"]
+                    generated = PurePosixPath(candidate["generated_file"])
+                    if (
+                        len(generated.parts) < 3
+                        or generated.parts[0] != "src"
+                        or generated.suffix != ".py"
+                    ):
+                        candidate_states[candidate_id].diagnostics.append(
+                            "candidate module path is invalid"
+                        )
+                        continue
+                    module = ".".join((*generated.parts[1:-1], generated.stem))
+                    result_directory = case_directory / f"candidate-{index}-result"
+                    result_directory.mkdir()
+                    candidate_output = _run_one(
+                        selected_sandbox,
+                        module=module,
+                        routine=case.routine,
+                        module_root="/modern/src",
+                        module_source=modern / "src",
+                        case_directory=case_directory,
+                        output_directory=result_directory,
+                    )
+                    candidate_state = candidate_states[candidate_id]
+                    candidate_state.cases += 1
+                    if oracle_result is None or candidate_output is None:
+                        candidate_state.diagnostics.append(
+                            f"sandbox execution failed for case {case.identifier}"
+                        )
+                        continue
+                    candidate_state.comparisons.append(
+                        compare_values(oracle_result, candidate_output, selected_policy)
+                    )
+        return _report(
+            manifest,
+            states,
+            candidate_states,
+            selected_policy,
+            image,
+            case_sha256,
+        )

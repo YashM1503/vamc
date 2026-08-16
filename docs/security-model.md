@@ -35,22 +35,42 @@ requires a digest-pinned Docker image and applies:
 - all Linux capabilities dropped;
 - `no-new-privileges`;
 - the caller's non-root UID/GID;
-- bounded CPU, memory, PIDs, open files, output, file size, and wall time;
-- `noexec`, `nosuid`, and `nodev` temporary storage;
+- bounded CPU, memory, PIDs, open files, output, per-file size, aggregate writable
+  bytes/entries, and wall time;
+- `noexec`, `nosuid`, and `nodev` runtime temporary storage;
 - sanitized environment variables;
 - read-only source, runner, oracle, and generated-package mounts;
 - a dedicated writable result directory.
 
+Native compilation uses the aggregate-monitored writable output mount as its
+compiler scratch directory because Meson must execute compiler sanity products.
+That mount is executable only inside the already isolated container; VAMC never
+executes its products on the host.
+
 The Docker daemon itself is a privileged boundary and must be operated according
-to local security policy. The sandbox image must contain Python, NumPy, Meson,
-Ninja, and a Fortran compiler. See [`sandbox/README.md`](../sandbox/README.md).
+to local security policy. The sandbox image must contain Python, NumPy, Numba,
+Meson, Ninja, and a Fortran compiler. See
+[`sandbox/README.md`](../sandbox/README.md).
+
+Candidate verification, benchmarking, and fallback compilation reuse this
+boundary and never substitute host execution. Benchmark evidence must match the
+exact migration, normalized cases, verification record, and digest-pinned image.
+Compiler-produced fallback files are treated as untrusted: symlinks, non-regular
+files, oversized products, and ambiguous extension sets are rejected. Generated
+packages do not import or compile a fallback automatically; a caller must review
+and explicitly bind it.
 
 ## Reports and sensitive data
 
 Reports can contain proprietary paths, hashes, routine names, call names, and
 numerical results. JSON outputs are created atomically and default to mode
-`0600`. Future HTML reports must escape all source-controlled text, use no
-remote resources or third-party scripts, and ship a restrictive CSP.
+`0600`. HTML reports escape source-controlled text, use no remote resources or
+scripts, and ship a restrictive CSP. Evidence readers reject symlinks, oversized
+records, unsupported schemas, duplicate identities, and broken digest linkage.
+
+SHA-256 detects accidental or local evidence substitution but is not a digital
+signature. Users needing adversarial provenance must sign and archive the
+records externally.
 
 ## Repository controls
 

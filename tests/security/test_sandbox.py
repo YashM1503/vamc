@@ -12,7 +12,9 @@ from vamc.runtime.sandbox import (
     SandboxLimits,
     SandboxMount,
     SandboxResult,
+    _writable_limit_exceeded,
 )
+from vamc.verify.io import read_regular_file
 from vamc.verify.native import load_cases, verify_native_directory
 
 _IMAGE = "example.invalid/vamc-sandbox@sha256:" + "a" * 64
@@ -84,6 +86,40 @@ def test_sandbox_requires_pinned_image_and_positive_limits() -> None:
         SandboxLimits(wall_seconds=0)
 
 
+def test_writable_mount_monitor_bounds_bytes_entries_and_ignores_symlink_targets(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "result"
+    root.mkdir()
+    (root / "one").write_bytes(b"1234")
+
+    assert not _writable_limit_exceeded((root,), 4, 1)
+    assert _writable_limit_exceeded((root,), 3, 10)
+    (root / "two").write_bytes(b"x")
+    assert _writable_limit_exceeded((root,), 100, 1)
+
+    outside = tmp_path / "outside"
+    outside.write_bytes(b"x" * 100)
+    link = root / "outside-link"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        return
+    assert not _writable_limit_exceeded((root,), 10, 3)
+
+
+def test_boundary_result_reader_never_follows_a_symlink(tmp_path: Path) -> None:
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"status":"forged"}', encoding="utf-8")
+    result = tmp_path / "result.json"
+    try:
+        result.symlink_to(outside)
+    except OSError:
+        return
+
+    assert read_regular_file(result, 1024) is None
+
+
 def test_case_schema_is_bounded_and_unique(tmp_path: Path) -> None:
     cases = tmp_path / "cases.json"
     cases.write_text(
@@ -115,6 +151,13 @@ def test_case_schema_is_bounded_and_unique(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     with pytest.raises(AnalysisError, match="unique"):
+        load_cases(cases)
+
+    cases.write_text(
+        '{"schema_version":"0.1.0","cases":[{"id":"keyword","routine":"x","keywords":{"N":1}}]}',
+        encoding="utf-8",
+    )
+    with pytest.raises(AnalysisError, match="arguments or keywords"):
         load_cases(cases)
 
 
@@ -190,6 +233,7 @@ def test_native_verification_records_domain_scoped_pass_and_failure(tmp_path: Pa
     assert passing.status is VerificationStatus.VERIFIED_FOR_TEST_DOMAIN
     assert passing.routines[0].cases == 1
     assert passing.routines[0].metrics.compared_values > 0
+    assert passing.summary.candidates_verified == 0
     assert failing.status is VerificationStatus.FAILED
     assert failing.routines[0].metrics.max_absolute_error == 63.0
 
@@ -217,3 +261,42 @@ def test_native_verification_reports_oracle_compile_failure(tmp_path: Path) -> N
 
     assert report.status is VerificationStatus.UNAVAILABLE
     assert "compilation failed" in report.routines[0].diagnostics[0]
+
+
+def test_native_verification_accepts_and_rejects_each_candidate(tmp_path: Path) -> None:
+    example = Path(__file__).parents[2] / "examples" / "daxpy"
+    modern = (
+        Project.from_path(example)
+        .migrate(optimize=True, parallel="auto")
+        .write(tmp_path / "modern")
+    )
+    cases = tmp_path / "cases.json"
+    cases.write_text(
+        json.dumps(
+            {
+                "schema_version": "0.1.0",
+                "cases": [{"id": "small", "routine": "daxpy"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    passing = verify_native_directory(
+        modern,
+        cases,
+        image=_IMAGE,
+        sandbox=_FakeSandbox(),
+    )
+    failing = verify_native_directory(
+        modern,
+        cases,
+        image=_IMAGE,
+        sandbox=_FakeSandbox(mismatch=True),
+    )
+
+    assert passing.summary.candidates_verified == 3
+    assert all(
+        item.status is VerificationStatus.VERIFIED_FOR_TEST_DOMAIN for item in passing.candidates
+    )
+    assert failing.summary.candidates_rejected == 3
+    assert all(item.status is VerificationStatus.FAILED for item in failing.candidates)

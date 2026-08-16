@@ -87,6 +87,7 @@ class VerificationStatus(StrEnum):
 
 
 class CandidateBackend(StrEnum):
+    SERIAL_PYTHON = "SERIAL_PYTHON"
     NUMPY = "NUMPY"
     NUMBA_SERIAL = "NUMBA_SERIAL"
     NUMBA_PARALLEL = "NUMBA_PARALLEL"
@@ -380,6 +381,8 @@ class VerificationSummary:
 class VerificationReport:
     schema_version: str
     migration_schema_version: str
+    migration_sha256: str
+    cases_sha256: str | None
     status: VerificationStatus
     sandbox: str
     sandbox_image: str | None
@@ -389,5 +392,94 @@ class VerificationReport:
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible verification record."""
+
+        return cast(dict[str, Any], _jsonable(asdict(self)))
+
+
+class BenchmarkStatus(StrEnum):
+    BENCHMARKED = "BENCHMARKED"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+@dataclass(frozen=True)
+class BenchmarkMeasurement:
+    implementation_id: str
+    routine: str
+    backend: CandidateBackend
+    status: BenchmarkStatus
+    samples_ns: tuple[int, ...]
+    median_ns: int | None
+    minimum_ns: int | None
+    maximum_ns: int | None
+    relative_to_serial: float | None
+    diagnostics: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class BenchmarkSelection:
+    routine: str
+    candidate_id: str
+    backend: CandidateBackend
+    speedup_over_serial: float
+
+
+@dataclass(frozen=True)
+class BenchmarkEnvironment:
+    python: str
+    platform: str
+    machine: str
+    numpy: str
+    numba: str
+
+
+@dataclass(frozen=True)
+class BenchmarkSummary:
+    routines: int
+    eligible_candidates: int
+    benchmarked_candidates: int
+    unavailable_candidates: int
+
+
+@dataclass(frozen=True)
+class BenchmarkReport:
+    schema_version: str
+    migration_sha256: str
+    verification_sha256: str
+    cases_sha256: str
+    sandbox_image: str
+    warmups: int
+    repeats: int
+    iterations: int
+    environment: BenchmarkEnvironment | None
+    measurements: tuple[BenchmarkMeasurement, ...]
+    selections: tuple[BenchmarkSelection, ...]
+    summary: BenchmarkSummary
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-compatible benchmark record."""
+
+        return cast(dict[str, Any], _jsonable(asdict(self)))
+
+
+class FallbackBuildStatus(StrEnum):
+    BUILT = "BUILT"
+    FAILED = "FAILED"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+@dataclass(frozen=True)
+class FallbackBuildReport:
+    schema_version: str
+    migration_sha256: str
+    sandbox_image: str
+    module_name: str
+    status: FallbackBuildStatus
+    artifact: str | None
+    artifact_sha256: str | None
+    artifact_size_bytes: int | None
+    diagnostics: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-compatible fallback build record."""
 
         return cast(dict[str, Any], _jsonable(asdict(self)))
