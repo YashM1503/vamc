@@ -41,7 +41,7 @@ security = [
   "bandit>=1.8.6,<2",
   "check-wheel-contents>=0.6.1,<1",
   "pip-audit>=2.9,<3",
-  "twine>=6.2,<7",
+  "twine>=6.2,<8",
 ]
 optimize = [
   "numpy>=2.4,<2.5",
