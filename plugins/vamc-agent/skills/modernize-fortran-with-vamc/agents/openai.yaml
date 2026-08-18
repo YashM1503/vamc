@@ -1,0 +1,4 @@
+interface:
+  display_name: "Modernize Fortran with VAMC"
+  short_description: "Analyze and verify legacy Fortran safely"
+  default_prompt: "Use $modernize-fortran-with-vamc to analyze this Fortran project and plan a fail-closed migration."

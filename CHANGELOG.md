@@ -6,6 +6,8 @@ All notable changes will be documented here.
 
 ### Added
 
+- An installable agent skill, repository plugin marketplace, and read-only MCP
+  tools for analysis, static verification, and deterministic report generation.
 - Initial package, CLI, typed public API, and engineering foundation.
 - Bounded Fortran source discovery and fixed/free-form normalization.
 - Deterministic routine, symbol, call, side-effect, and loop inventory.

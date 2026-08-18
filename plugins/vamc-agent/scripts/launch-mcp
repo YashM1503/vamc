@@ -1,0 +1,31 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+
+if [ -n "${VAMC_PYTHON:-}" ]; then
+  if [ ! -x "$VAMC_PYTHON" ]; then
+    echo "VAMC_PYTHON must name an executable Python environment containing VAMC" >&2
+    exit 127
+  fi
+  exec "$VAMC_PYTHON" -m vamc.mcp
+fi
+
+if [ -f "$repo_root/pyproject.toml" ] && [ -x "$repo_root/.venv/bin/python" ]; then
+  exec "$repo_root/.venv/bin/python" -m vamc.mcp
+fi
+
+if command -v vamc-mcp >/dev/null 2>&1; then
+  exec vamc-mcp
+fi
+
+for python_command in python3.14 python3.13 python3.12 python3.11; do
+  if command -v "$python_command" >/dev/null 2>&1 && \
+    "$python_command" -c 'import vamc.mcp' >/dev/null 2>&1; then
+    exec "$python_command" -m vamc.mcp
+  fi
+done
+
+echo "Install VAMC in Python 3.11-3.14 or set VAMC_PYTHON to that environment" >&2
+exit 127

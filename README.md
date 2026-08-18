@@ -133,6 +133,14 @@ corpus.
 The [documentation index](docs/README.md) links every public usage, architecture,
 security, extension, contribution, support, and release guide shipped with VAMC.
 
+## Agent integration
+
+The repository includes an installable agent skill and a read-only MCP server
+for analysis, static migration verification, and report generation. It does not
+expose native execution, benchmarking, migration writes, or fallback builds.
+See the [agent integration guide](docs/agent-integration.md) for installation,
+tool boundaries, and verification commands.
+
 ## Contributing
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md). Security reports should follow
