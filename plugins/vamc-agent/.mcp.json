@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "vamc": {
+      "command": "./scripts/launch-mcp",
+      "args": [],
+      "cwd": ".",
+      "env_vars": [
+        "VAMC_PYTHON"
+      ]
+    }
+  }
+}

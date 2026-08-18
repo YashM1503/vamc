@@ -1,0 +1,37 @@
+{
+  "name": "vamc-agent",
+  "version": "0.1.0",
+  "description": "Agent skill and read-only MCP tools for VAMC",
+  "author": {
+    "name": "Yash Misra",
+    "url": "https://github.com/YashM1503"
+  },
+  "homepage": "https://github.com/YashM1503/vamc",
+  "repository": "https://github.com/YashM1503/vamc",
+  "license": "Apache-2.0",
+  "keywords": [
+    "fortran",
+    "modernization",
+    "verification",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "VAMC Agent",
+    "shortDescription": "Analyze and verify legacy Fortran safely",
+    "longDescription": "Guides fail-closed VAMC modernization and exposes read-only MCP tools for analysis, static verification, and evidence reports.",
+    "developerName": "Yash Misra",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Analyze"
+    ],
+    "websiteURL": "https://github.com/YashM1503/vamc",
+    "defaultPrompt": [
+      "Analyze this Fortran project with VAMC.",
+      "Verify this VAMC migration without executing it.",
+      "Build a VAMC evidence report."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

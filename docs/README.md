@@ -4,6 +4,7 @@ VAMC's public documentation is organized by task and assurance boundary.
 
 ## Use VAMC
 
+- [Agent skill, plugin, and MCP integration](agent-integration.md)
 - [CLI reference](cli.md)
 - [Supported Fortran](supported-fortran.md)
 - [Verification semantics](verification-semantics.md)

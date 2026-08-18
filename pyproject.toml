@@ -57,6 +57,7 @@ Changelog = "https://github.com/YashM1503/vamc/blob/main/CHANGELOG.md"
 
 [project.scripts]
 vamc = "vamc.cli:main"
+vamc-mcp = "vamc.mcp:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
